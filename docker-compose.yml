@@ -5,5 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "8272:8272"
+    environment:
+      - TZ=America/Phoenix
+      - PUID=1000
+      - PGID=1000
     volumes:
       - ./data:/config
