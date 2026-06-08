@@ -2,7 +2,7 @@ fastapi==0.116.1
 uvicorn[standard]==0.35.0
 httpx==0.28.1
 pydantic==2.13.4
-pydantic-settings==2.10.1
+pydantic-settings==2.14.1
 SQLAlchemy==2.0.50
 Jinja2==3.1.6
 python-multipart==0.0.32
