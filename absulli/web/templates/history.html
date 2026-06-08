@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>History</h1>
+    <p>Imported Audiobookshelf listening sessions.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Global Listening History</h2>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Listening Time</th>
+          <th>Started</th>
+          <th>Imported</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.username }}</td>
+            <td>
+              {% if row.abs_item_id %}
+                <a class="table-link" href="/media/{{ row.abs_item_id }}">{{ row.title }}</a>
+              {% else %}
+                {{ row.title }}
+              {% endif %}
+            </td>
+            <td>{{ row.media_type }}</td>
+            <td>{{ fmt_seconds(row.duration_seconds) }}</td>
+            <td>{{ row.started_at or '' }}</td>
+            <td>{{ row.imported_at }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" class="empty">No history imported yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

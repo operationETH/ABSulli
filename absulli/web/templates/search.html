@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Search</h1>
+    {% if search_query %}
+      <p>Results for “{{ search_query }}”.</p>
+    {% else %}
+      <p>Search titles, authors, users, libraries, and history.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel search-panel">
+  <form class="search-page-form" action="/search" method="get">
+    <input name="q" value="{{ search_query }}" placeholder="Search history, users, titles..." autofocus>
+    <button type="submit">Search</button>
+  </form>
+</section>
+
+{% if search_query %}
+<section class="panel">
+  <div class="panel-head"><h2>Media</h2></div>
+  <div class="search-result-grid">
+    {% for item in media_items %}
+      <a class="search-result-card" href="/media/{{ item.abs_item_id }}">
+        <div class="search-result-cover">
+          {% if item.abs_item_id %}
+            <img src="/covers/items/{{ item.abs_item_id }}?width=180" alt="{{ item.title or 'Cover art' }} cover" loading="lazy">
+          {% else %}
+            <span>♫</span>
+          {% endif %}
+        </div>
+        <div>
+          <strong>{{ item.title or "Unknown title" }}</strong>
+          <p>{{ item.author or item.library_name or item.media_type or "Unknown" }}</p>
+          <span>{{ item.media_type or "unknown" }}</span>
+        </div>
+      </a>
+    {% else %}
+      <div class="activity-empty">No matching media.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>People and Libraries</h2></div>
+  <div class="search-list-grid">
+    <div>
+      <h3>Users</h3>
+      {% for user in users %}
+        <a class="search-list-row" href="/users/{{ (user.display_name or user.username)|urlencode }}">
+          <span class="mini-avatar">{{ (user.display_name or user.username or '?')[:1]|upper }}</span>
+          <strong>{{ user.display_name or user.username }}</strong>
+        </a>
+      {% else %}
+        <p class="subtle">No matching users.</p>
+      {% endfor %}
+    </div>
+
+    <div>
+      <h3>Libraries</h3>
+      {% for library in libraries %}
+        <a class="search-list-row" href="/libraries/{{ library.abs_library_id }}">
+          <span class="mini-avatar">▤</span>
+          <strong>{{ library.name }}</strong>
+          <em>{{ library.item_count }} items</em>
+        </a>
+      {% else %}
+        <p class="subtle">No matching libraries.</p>
+      {% endfor %}
+    </div>
+
+    <div>
+      <h3>Authors</h3>
+      {% for author, count in authors %}
+        <a class="search-list-row" href="/authors/{{ author|urlencode }}">
+          <span class="mini-avatar">✎</span>
+          <strong>{{ author }}</strong>
+          <em>{{ count }} items</em>
+        </a>
+      {% else %}
+        <p class="subtle">No matching authors.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>History</h2></div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Listening Time</th>
+          <th>Started</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in history_rows %}
+          <tr>
+            <td>
+              {% if row.username %}<a class="table-link" href="/users/{{ row.username|urlencode }}">{{ row.username }}</a>{% else %}Unknown{% endif %}
+            </td>
+            <td>
+              {% if row.abs_item_id %}<a class="table-link" href="/media/{{ row.abs_item_id }}">{{ row.title }}</a>{% else %}{{ row.title }}{% endif %}
+            </td>
+            <td>{{ row.media_type }}</td>
+            <td>{{ fmt_seconds(row.duration_seconds) }}</td>
+            <td>{{ row.started_at or row.imported_at or '' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">No matching history.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

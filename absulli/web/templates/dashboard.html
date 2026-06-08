@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Activity</h1>
+    <p id="live-activity-summary">
+      {% if active %}
+        {{ active|length }} active listening session{{ '' if active|length == 1 else 's' }}.
+      {% else %}
+        Nothing is currently being played.
+      {% endif %}
+    </p>
+  </div>
+</section>
+
+<section class="panel now-panel{% if not active %} is-hidden{% endif %}" id="now-listening-panel" data-live-activity>
+  <div class="panel-head">
+    <h2>Now Listening</h2>
+    <a href="/activity">View all</a>
+  </div>
+
+  <div class="now-grid" id="now-listening-grid">
+    {% for row in active %}
+      {% set progress = row.progress or 0 %}
+      {% if progress > 100 %}
+        {% set progress = 100 %}
+      {% elif progress < 0 %}
+        {% set progress = 0 %}
+      {% endif %}
+
+      <article class="stream-card activity-card" data-session-key="{{ row.session_key }}">
+        <div class="stream-main">
+          <div class="stream-cover">
+            {% if row.abs_item_id %}
+              <img src="/covers/items/{{ row.abs_item_id }}?width=260" alt="{{ row.title or 'Cover art' }} cover" loading="lazy">
+            {% else %}
+              <span>♫</span>
+            {% endif %}
+          </div>
+
+          <div class="stream-details">
+            <div class="stream-client-badge" title="{{ row.device or row.client or 'Unknown client' }}">
+              {{ (row.client or row.device or '?')[:1] }}
+            </div>
+            <dl>
+              <div><dt>Product</dt><dd>{{ row.client or 'Unknown' }}</dd></div>
+              <div><dt>Player</dt><dd>{{ row.device or row.model or 'Unknown' }}</dd></div>
+              <div><dt>Media</dt><dd>{{ row.media_type or 'unknown' }}</dd></div>
+              <div><dt>Library</dt><dd>{{ row.library_name or 'Unknown' }}</dd></div>
+              <div><dt>Position</dt><dd><span data-live-position>{{ row.current_time|int if row.current_time else 0 }}</span></dd></div>
+              <div><dt>Progress</dt><dd><span data-live-progress>{{ "%.1f"|format(progress) }}</span>%</dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="progress stream-progress">
+          <span data-live-progress-bar data-initial-progress="{{ progress }}"></span>
+        </div>
+
+        <div class="stream-footer">
+          <div class="stream-title-wrap">
+            <h3>{% if row.abs_item_id %}<a href="/media/{{ row.abs_item_id }}">{{ row.title or "Unknown title" }}</a>{% else %}{{ row.title or "Unknown title" }}{% endif %}</h3>
+            <p>{{ row.author or row.media_type or "Unknown" }}</p>
+          </div>
+          <div class="stream-user" title="{{ row.username or 'Unknown user' }}">
+            <span>{{ (row.username or '?')[:1] }}</span>
+            <strong>{{ row.username or "Unknown" }}</strong>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+
+<h2 class="section-title">Listen Statistics</h2>
+
+<form class="button-row dashboard-button-row stat-filter" method="get" action="/">
+  <a class="tab-btn {{ 'active' if stat_metric == 'count' else '' }}" href="/?metric=count&days={{ stat_days }}&recent_type={{ recent_type }}&recent_limit={{ recent_limit }}">Play Count</a>
+  <a class="tab-btn {{ 'active' if stat_metric == 'duration' else '' }}" href="/?metric=duration&days={{ stat_days }}&recent_type={{ recent_type }}&recent_limit={{ recent_limit }}">Play Duration</a>
+  <span class="tab-btn tab-label">Last</span>
+  <input type="hidden" name="metric" value="{{ stat_metric }}">
+  <input type="hidden" name="recent_type" value="{{ recent_type }}">
+  <input type="hidden" name="recent_limit" value="{{ recent_limit }}">
+  <input class="tab-btn days-input" type="number" name="days" min="1" max="999" step="1" value="{{ stat_days }}" aria-label="Number of days for listen statistics">
+  <button class="tab-btn days-submit" type="submit">days</button>
+</form>
+
+<section class="stats-grid">
+  {% for card in stat_cards %}
+    <article class="stat-card {{ 'wide' if card['wide'] else '' }}" data-card-bg="{{ card['bg'] }}">
+      <div class="stat-bg"></div>
+
+      <div class="stat-media {{ 'has-cover' if card.get('cover_url') or card.get('cover_item_id') else '' }}" data-icon="{{ card['icon'] }}">
+        {% if card.get('cover_url') %}
+          <img src="{{ card['cover_url'] }}?width=160" alt="{{ card['title'] }} thumbnail" loading="lazy">
+        {% elif card.get('cover_item_id') %}
+          <img src="/covers/items/{{ card['cover_item_id'] }}?width=160" alt="{{ card['title'] }} cover" loading="lazy">
+        {% else %}
+          <span>{{ card["icon"] }}</span>
+        {% endif %}
+      </div>
+
+      <div class="stat-body">
+        <div class="stat-card-head">
+          <h3 title="{{ card['title'] }}">{{ card["title"] }}</h3>
+          {% if card.get('subtitle') %}
+            <span>{{ card['subtitle'] }}</span>
+          {% endif %}
+        </div>
+
+        <div class="stat-table-scroll" tabindex="0" aria-label="{{ card['title'] }} list">
+          <table class="stat-table">
+            <tbody>
+              {% for item in card["items"] %}
+              <tr{% if item.get('author_cover_url') %} data-hover-cover="{{ item['author_cover_url'] }}?width=160"{% elif item.get('item_id') %} data-hover-cover="/covers/items/{{ item['item_id'] }}?width=160"{% endif %}>
+                <td class="rank">{{ loop.index }}</td>
+                <td class="item-name" title="{{ item['name'] }}">
+                  {% if item.get('url') %}
+                    <a class="stat-link" href="{{ item['url'] }}">{{ item["name"] }}</a>
+                  {% elif item.get('item_id') %}
+                    <a class="stat-link" href="/media/{{ item['item_id'] }}">{{ item["name"] }}</a>
+                  {% else %}
+                    {{ item["name"] }}
+                  {% endif %}
+                </td>
+                <td class="metric">{{ item["value"] }}</td>
+              </tr>
+              {% else %}
+                <tr>
+                  <td class="rank">–</td>
+                  <td class="item-name">No data yet</td>
+                  <td class="metric">0</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+  {% endfor %}
+</section>
+
+<h2 class="section-title">Library Statistics</h2>
+
+<section class="stats-grid library-grid">
+  {% for card in library_cards %}
+    <article class="stat-card {{ 'wide' if card['wide'] else '' }}" data-card-bg="{{ card['bg'] }}">
+      <div class="stat-bg"></div>
+      <div class="stat-media {{ 'has-cover' if card.get('cover_url') or card.get('cover_author_id') else '' }}" data-icon="{{ card['icon'] }}">
+        {% if card.get('cover_url') %}
+          <img src="{{ card['cover_url'] }}?width=160" alt="{{ card['title'] }} thumbnail" loading="lazy">
+        {% elif card.get('cover_author_id') %}
+          <img src="/covers/authors/{{ card['cover_author_id'] }}?width=160" alt="{{ card['title'] }} thumbnail" loading="lazy">
+        {% else %}
+          <span>{{ card["icon"] }}</span>
+        {% endif %}
+      </div>
+
+      <div class="stat-body">
+        <h3 title="{{ card['title'] }}">{{ card["title"] }}</h3>
+
+        <div class="stat-table-scroll" tabindex="0" aria-label="{{ card['title'] }} list">
+          <table class="stat-table">
+            <tbody>
+              {% for item in card["items"] %}
+              <tr{% if item.get('author_cover_url') %} data-hover-cover="{{ item['author_cover_url'] }}?width=160"{% elif item.get('author_id') %} data-hover-cover="/covers/authors/{{ item['author_id'] }}?width=160"{% elif item.get('item_id') %} data-hover-cover="/covers/items/{{ item['item_id'] }}?width=160"{% endif %}>
+                <td class="rank">{{ loop.index }}</td>
+                <td class="item-name" title="{{ item['name'] }}">
+                  {% if item.get('url') %}
+                    <a class="stat-link" href="{{ item['url'] }}">{{ item["name"] }}</a>
+                  {% else %}
+                    {{ item["name"] }}
+                  {% endif %}
+                </td>
+                <td class="metric">{{ item["value"] }}</td>
+              </tr>
+              {% else %}
+                <tr>
+                  <td class="rank">–</td>
+                  <td class="item-name">No imported media yet</td>
+                  <td class="metric">0</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+  {% endfor %}
+</section>
+
+<h2 class="section-title">Recently Added</h2>
+
+<form class="button-row dashboard-button-row-small recent-filter" method="get" action="/">
+  <a class="tab-btn {{ 'active' if recent_type == 'all' else '' }}" href="/?metric={{ stat_metric }}&days={{ stat_days }}&recent_type=all&recent_limit={{ recent_limit }}">All</a>
+  <a class="tab-btn {{ 'active' if recent_type == 'book' else '' }}" href="/?metric={{ stat_metric }}&days={{ stat_days }}&recent_type=book&recent_limit={{ recent_limit }}">Books</a>
+  <a class="tab-btn {{ 'active' if recent_type == 'podcast' else '' }}" href="/?metric={{ stat_metric }}&days={{ stat_days }}&recent_type=podcast&recent_limit={{ recent_limit }}">Podcasts</a>
+  <input type="hidden" name="metric" value="{{ stat_metric }}">
+  <input type="hidden" name="days" value="{{ stat_days }}">
+  <input type="hidden" name="recent_type" value="{{ recent_type }}">
+  <input class="tab-btn days-input" type="number" name="recent_limit" min="1" max="999" step="1" value="{{ recent_limit }}" aria-label="Number of recently added items">
+  <button class="tab-btn days-submit" type="submit">items</button>
+</form>
+
+<section class="cover-rail" aria-label="Recently added media">
+  {% for item in recent_items %}
+    <article class="recent-cover-card">
+      <a class="recent-card-link" href="/media/{{ item.abs_item_id }}" aria-label="View history for {{ item.title or 'Unknown title' }}">
+        <div class="recent-cover-art">
+          {% if item.abs_item_id %}
+            <img src="/covers/items/{{ item.abs_item_id }}?width=260" alt="{{ item.title or 'Cover art' }} cover" loading="lazy">
+          {% else %}
+            <span>♫</span>
+          {% endif %}
+        </div>
+        <h3 title="{{ item.title or 'Unknown title' }}">{{ item.title or "Unknown title" }}</h3>
+        <p title="{{ item.author or 'Unknown author' }}">{{ item.author or "Unknown author" }}</p>
+        <span>{{ item.added_at.strftime('%m/%d') if item.added_at else item.media_type or 'unknown' }}</span>
+      </a>
+    </article>
+  {% else %}
+    <div class="activity-empty">No recently imported media yet.</div>
+  {% endfor %}
+</section>
+
+
+<p class="footer-note">
+  ABSulli is an Audiobookshelf monitoring tool inspired by the concept of Tautulli.
+</p>
+
+{% endblock %}

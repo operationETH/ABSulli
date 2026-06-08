@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <a href="/">Home</a>
+  <span>›</span>
+  <a href="/history">History</a>
+  <span>›</span>
+  <strong>{{ author }}</strong>
+</nav>
+
+<section class="media-hero author-hero"{% if author_cover_url %} data-media-bg="{{ author_cover_url }}?width=1000"{% endif %}>
+  <div class="media-hero-shade"></div>
+
+  <div class="media-poster author-poster">
+    {% if author_cover_url %}
+      <img
+        class="js-author-image"
+        src="{{ author_cover_url }}?width=420"
+        alt="{{ author }} image"
+        loading="lazy"
+      >
+      <span class="author-image-fallback">✎</span>
+    {% else %}
+      <span class="author-image-fallback">✎</span>
+    {% endif %}
+  </div>
+
+  <div class="media-summary">
+    <h1>{{ author }}</h1>
+
+    <div class="media-meta">
+      <span>Author</span>
+      <span>{{ books|length }} item{{ '' if books|length == 1 else 's' }}</span>
+    </div>
+
+    {% if author_description %}
+      <div class="media-description-wrap is-collapsed" data-readmore>
+        <p class="media-description">{{ author_description }}</p>
+        <button class="read-more-btn" type="button" data-readmore-toggle aria-expanded="false">
+          Read more <span>⌄</span>
+        </button>
+      </div>
+    {% else %}
+      <p class="media-description">Book list, global stats, user stats, and listening history for this author.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="author-list-section">
+  <div class="panel-head plain-head">
+    <h2>Book List for {{ author }}</h2>
+  </div>
+
+  <div class="author-book-rail" aria-label="Books by {{ author }}">
+    {% for book in books %}
+      <article class="author-book-card">
+        <a class="recent-card-link" href="/media/{{ book.abs_item_id }}" aria-label="View history for {{ book.title or 'Unknown title' }}">
+          <div class="author-book-cover">
+            {% if book.abs_item_id %}
+              <img src="/covers/items/{{ book.abs_item_id }}?width=260" alt="{{ book.title or 'Cover art' }} cover" loading="lazy">
+            {% else %}
+              <span>♫</span>
+            {% endif %}
+          </div>
+          <h3 title="{{ book.title or 'Unknown title' }}">{{ book.title or "Unknown title" }}</h3>
+          <p title="{{ book.series or book.library_name or book.media_type or 'Unknown' }}">
+            {{ book.series or book.library_name or book.media_type or "Unknown" }}
+          </p>
+          {% if book.added_at %}<span>{{ book.added_at.strftime('%m/%d/%Y') }}</span>{% endif %}
+        </a>
+      </article>
+    {% else %}
+      <div class="activity-empty">No imported books found for this author yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="media-stat-section">
+  <div class="panel-head plain-head">
+    <h2>Global Stats</h2>
+  </div>
+
+  <div class="global-stat-grid">
+    {% for stat in window_stats %}
+      <div class="global-stat-box">
+        <span>{{ stat.label }}</span>
+        <strong>{{ stat.plays }}</strong>
+        <em>plays</em>
+        <b>{{ stat.duration }}</b>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="media-stat-section">
+  <div class="panel-head plain-head">
+    <h2>User Stats</h2>
+  </div>
+
+  <div class="user-stat-grid">
+    {% for user in user_stats %}
+      <article class="user-stat-card">
+        <div class="user-avatar">{{ user.initial }}</div>
+        <div>
+          <h3>{{ user.username }}</h3>
+          <strong>{{ user.plays }}</strong><span> plays</span>
+          <p>{{ user.duration }}</p>
+        </div>
+      </article>
+    {% else %}
+      <div class="activity-empty">No user stats yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel media-history-panel">
+  <div class="panel-head">
+    <h2>Listen History for {{ author }}</h2>
+    <a href="/history">View all history</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table media-history-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>User</th>
+          <th>Title</th>
+          <th>Platform</th>
+          <th>Device</th>
+          <th>Started</th>
+          <th>Updated</th>
+          <th>Progress</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.started_at.strftime('%Y-%m-%d') if row.started_at else row.imported_at.strftime('%Y-%m-%d') if row.imported_at else '' }}</td>
+            <td>{{ row.username or 'Unknown' }}</td>
+            <td>
+              {% if row.abs_item_id %}
+                <a class="table-link" href="/media/{{ row.abs_item_id }}">{{ row.title or 'Unknown title' }}</a>
+              {% else %}
+                {{ row.title or 'Unknown title' }}
+              {% endif %}
+            </td>
+            <td>{{ row.client or 'Unknown' }}</td>
+            <td>{{ row.device_name or row.model or row.device or 'Unknown' }}</td>
+            <td>{{ row.started_at.strftime('%H:%M') if row.started_at else '' }}</td>
+            <td>{{ row.updated_at.strftime('%H:%M') if row.updated_at else '' }}</td>
+            <td>{{ '%.1f'|format(row.progress or 0) }}%</td>
+            <td>{{ fmt_seconds(row.duration_seconds) }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="9" class="empty">No listening history imported for this author yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "absulli"
+dynamic = ["version"]
+description = "Audiobookshelf monitoring tool inspired by the concept of Tautulli"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "operationETH" }]
+
+
+[tool.setuptools.packages.find]
+include = ["absulli*"]
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+write_to = "absulli/_version.py"
+write_to_template = "__version__ = {version!r}\n"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

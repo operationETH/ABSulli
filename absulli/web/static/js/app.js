@@ -1,0 +1,543 @@
+const LIVE_ACTIVITY_REFRESH_MS = 15000;
+let liveActivityRows = [];
+let liveActivityTimer = null;
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function livePosition(row) {
+  const duration = Number(row.duration || 0);
+  let current = Number(row.current_time || 0);
+  const updatedRaw = row.updated_at || row.last_seen_at;
+  if (updatedRaw) {
+    const updated = new Date(updatedRaw);
+    if (!Number.isNaN(updated.getTime())) {
+      current += Math.max(0, (Date.now() - updated.getTime()) / 1000);
+    }
+  }
+  if (duration > 0) return Math.min(duration, Math.max(0, current));
+  return Math.max(0, current);
+}
+
+function liveProgress(row) {
+  const duration = Number(row.duration || 0);
+  const current = livePosition(row);
+  if (duration > 0) return Math.max(0, Math.min(100, (current / duration) * 100));
+  return Math.max(0, Math.min(100, Number(row.progress || 0)));
+}
+
+function activitySummary(count) {
+  return count === 1 ? '1 active listening session.' : count > 1 ? `${count} active listening sessions.` : 'Nothing is currently being played.';
+}
+
+function renderStreamCard(row) {
+  const progress = liveProgress(row);
+  const position = livePosition(row);
+  const title = row.title || 'Unknown title';
+  const author = row.author || row.media_type || 'Unknown';
+  const user = row.username || 'Unknown';
+  const product = row.client || 'Unknown';
+  const player = row.device || row.model || 'Unknown';
+  const mediaType = row.media_type || 'unknown';
+  const library = row.library_name || 'Unknown';
+  const duration = Number(row.duration || 0);
+  const positionText = duration > 0 ? `${formatDuration(position)} / ${formatDuration(duration)}` : formatDuration(position);
+  const cover = row.abs_item_id
+    ? `<img src="/covers/items/${encodeURIComponent(row.abs_item_id)}?width=260" alt="${escapeHtml(title)} cover" loading="lazy">`
+    : '<span>♫</span>';
+  const titleLink = row.abs_item_id
+    ? `<a href="/media/${encodeURIComponent(row.abs_item_id)}">${escapeHtml(title)}</a>`
+    : escapeHtml(title);
+
+  return `
+    <article class="stream-card activity-card" data-session-key="${escapeHtml(row.session_key || '')}">
+      <div class="stream-main">
+        <div class="stream-cover">${cover}</div>
+        <div class="stream-details">
+          <div class="stream-client-badge" title="${escapeHtml(player || product)}">${escapeHtml(String(product || player || '?').slice(0, 1))}</div>
+          <dl>
+            <div><dt>Product</dt><dd>${escapeHtml(product)}</dd></div>
+            <div><dt>Player</dt><dd>${escapeHtml(player)}</dd></div>
+            <div><dt>Media</dt><dd>${escapeHtml(mediaType)}</dd></div>
+            <div><dt>Library</dt><dd>${escapeHtml(library)}</dd></div>
+            <div><dt>Position</dt><dd><span data-live-position>${escapeHtml(positionText)}</span></dd></div>
+            <div><dt>Progress</dt><dd><span data-live-progress>${progress.toFixed(1)}</span>%</dd></div>
+          </dl>
+        </div>
+      </div>
+      <div class="progress stream-progress"><span data-live-progress-bar data-initial-progress="${progress.toFixed(1)}"></span></div>
+      <div class="stream-footer">
+        <div class="stream-title-wrap">
+          <h3>${titleLink}</h3>
+          <p>${escapeHtml(author)}</p>
+        </div>
+        <div class="stream-user" title="${escapeHtml(user)}">
+          <span>${escapeHtml(user.slice(0, 1) || '?')}</span>
+          <strong>${escapeHtml(user)}</strong>
+        </div>
+      </div>
+    </article>`;
+}
+
+function renderDashboardActivity(rows) {
+  const summary = document.getElementById('live-activity-summary');
+  if (summary) summary.textContent = activitySummary(rows.length);
+
+  const panel = document.getElementById('now-listening-panel');
+  const grid = document.getElementById('now-listening-grid');
+  if (!panel || !grid) return;
+
+  panel.classList.toggle('is-hidden', rows.length === 0);
+  grid.innerHTML = rows.map(renderStreamCard).join('');
+  initializeStaticProgressBars(grid);
+}
+
+function renderActivityTable(rows) {
+  const activeCount = document.getElementById('activity-active-count');
+  if (activeCount) activeCount.textContent = rows.length;
+
+  const summary = document.getElementById('activity-page-summary');
+  if (summary) summary.textContent = activitySummary(rows.length);
+
+  const lastRefresh = document.getElementById('activity-last-refresh');
+  if (lastRefresh) lastRefresh.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+  const tableBody = document.getElementById('activity-table-body');
+  if (!tableBody) return;
+
+  if (!rows.length) {
+    tableBody.innerHTML = '<tr><td colspan="6" class="empty">No active listening sessions.</td></tr>';
+    return;
+  }
+
+  tableBody.innerHTML = rows.map((row) => {
+    const progress = liveProgress(row);
+    const title = row.title || 'Unknown title';
+    const titleCell = row.abs_item_id
+      ? `<a class="table-link" href="/media/${encodeURIComponent(row.abs_item_id)}">${escapeHtml(title)}</a>`
+      : escapeHtml(title);
+    return `<tr data-session-key="${escapeHtml(row.session_key || '')}">
+      <td><span class="status-dot green"></span>Active</td>
+      <td>${escapeHtml(row.username || 'Unknown')}</td>
+      <td>${titleCell}</td>
+      <td><span data-live-progress>${progress.toFixed(1)}</span>%</td>
+      <td>${escapeHtml(row.device || row.client || 'Unknown')}</td>
+      <td>${escapeHtml(formatDateTime(row.last_seen_at || row.updated_at))}</td>
+    </tr>`;
+  }).join('');
+}
+
+function tickLiveProgress() {
+  document.querySelectorAll('[data-live-progress]').forEach((node) => {
+    const holder = node.closest('.stream-card, tr[data-session-key]');
+    if (!holder) return;
+    const key = holder.dataset.sessionKey;
+    const row = liveActivityRows.find((candidate) => String(candidate.session_key || '') === String(key || ''));
+    if (!row) return;
+    const progress = liveProgress(row);
+    node.textContent = progress.toFixed(1);
+    const positionNode = holder.querySelector('[data-live-position]');
+    if (positionNode) {
+      const duration = Number(row.duration || 0);
+      const position = livePosition(row);
+      positionNode.textContent = duration > 0 ? `${formatDuration(position)} / ${formatDuration(duration)}` : formatDuration(position);
+    }
+    const bar = holder.querySelector('[data-live-progress-bar], [data-progress]');
+    if (bar) bar.style.width = `${progress.toFixed(1)}%`;
+  });
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    document.title = `ABSulli · ${data.active_sessions} active`;
+  } catch (e) {}
+}
+
+async function refreshLiveActivity() {
+  const needsDashboard = document.getElementById('now-listening-panel') || document.getElementById('live-activity-summary');
+  const needsActivityPage = document.getElementById('activity-table-body');
+  if (!needsDashboard && !needsActivityPage) return;
+
+  try {
+    const r = await fetch('/api/activity', { cache: 'no-store' });
+    if (!r.ok) return;
+    liveActivityRows = await r.json();
+    if (needsDashboard) renderDashboardActivity(liveActivityRows);
+    if (needsActivityPage) renderActivityTable(liveActivityRows);
+  } catch (e) {}
+}
+
+
+
+function initializeCardBackgrounds(root = document) {
+  root.querySelectorAll('[data-card-bg]').forEach((card) => {
+    card.style.setProperty('--card-bg', card.dataset.cardBg || 'linear-gradient(135deg,#303030,#242424)');
+  });
+}
+
+function initializeMediaBackgrounds(root = document) {
+  root.querySelectorAll('[data-media-bg]').forEach((hero) => {
+    const value = hero.dataset.mediaBg || '';
+    if (value) hero.style.setProperty('--media-bg', `url('${value.replaceAll("'", "%27")}')`);
+  });
+}
+
+function initializeAutoSubmit(root = document) {
+  root.querySelectorAll('[data-auto-submit]').forEach((field) => {
+    field.addEventListener('change', () => {
+      if (field.form) field.form.submit();
+    });
+  });
+}
+
+function initializeHoverCovers(root = document) {
+  root.querySelectorAll('.stat-card').forEach((card) => {
+    const media = card.querySelector('.stat-media');
+    if (!media) return;
+
+    const originalHtml = media.innerHTML;
+    const originalHadCover = media.classList.contains('has-cover');
+
+    const ensureImage = () => {
+      let image = media.querySelector('img');
+      if (!image) {
+        media.innerHTML = '';
+        image = document.createElement('img');
+        media.appendChild(image);
+      }
+      media.classList.add('has-cover');
+      return image;
+    };
+
+    const restoreOriginal = () => {
+      media.innerHTML = originalHtml;
+      media.classList.toggle('has-cover', originalHadCover);
+      media.classList.remove('is-hovering');
+    };
+
+    card.querySelectorAll('[data-hover-cover]').forEach((row) => {
+      const setHover = () => {
+        const image = ensureImage();
+        image.src = row.dataset.hoverCover;
+        image.alt = `${row.querySelector('.item-name')?.textContent?.trim() || 'Selected item'} cover`;
+        media.classList.add('is-hovering');
+      };
+
+      row.addEventListener('mouseenter', setHover);
+      row.addEventListener('mouseleave', restoreOriginal);
+      row.addEventListener('focusin', setHover);
+      row.addEventListener('focusout', restoreOriginal);
+    });
+  });
+}
+
+function initializeStaticProgressBars(root = document) {
+  root.querySelectorAll('[data-live-progress-bar][data-initial-progress]').forEach((bar) => {
+    const progress = Math.max(0, Math.min(100, Number(bar.dataset.initialProgress || 0)));
+    bar.style.width = `${progress.toFixed(1)}%`;
+  });
+}
+
+
+function initializeSetupConnectionTest(root = document) {
+  const form = root.getElementById ? root.getElementById('setup-form') : document.getElementById('setup-form');
+  const button = root.getElementById ? root.getElementById('setup-test-connection') : document.getElementById('setup-test-connection');
+  const result = root.getElementById ? root.getElementById('setup-test-result') : document.getElementById('setup-test-result');
+  if (!form || !button || !result) return;
+
+  const showResult = (state, message) => {
+    result.hidden = false;
+    result.className = `setup-test-result ${state}`;
+    result.textContent = message;
+  };
+
+  button.addEventListener('click', async () => {
+    showResult('is-loading', '↕ Testing connection...');
+    button.disabled = true;
+
+    try {
+      const response = await fetch('/setup/test-connection', {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+      const ok = response.ok && data.ok;
+      showResult(
+        ok ? 'is-success' : 'is-error',
+        data.message || (ok ? '✓ Connection successful!' : '⚠ Connection failed.')
+      );
+    } catch (e) {
+      showResult('is-error', '⚠ Connection test failed. Check the URL and network.');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+function startLiveActivityRefresh() {
+  initializeCardBackgrounds();
+  initializeMediaBackgrounds();
+  initializeAutoSubmit();
+  initializeHoverCovers();
+  initializeStaticProgressBars();
+  initializeSetupConnectionTest();
+  refreshStatus();
+  refreshLiveActivity();
+  setInterval(refreshStatus, 30000);
+  setInterval(refreshLiveActivity, LIVE_ACTIVITY_REFRESH_MS);
+  if (!liveActivityTimer) liveActivityTimer = setInterval(tickLiveProgress, 1000);
+}
+
+startLiveActivityRefresh();
+
+document.addEventListener('error', (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement)) return;
+
+  if (image.classList.contains('js-author-image')) {
+    const poster = image.closest('.media-poster');
+    if (poster) poster.classList.add('poster-fallback');
+    image.remove();
+    return;
+  }
+
+  const statMedia = image.closest('.stat-media');
+  if (statMedia) {
+    const icon = statMedia.dataset.icon || '▤';
+    statMedia.classList.remove('has-cover', 'is-hovering');
+    statMedia.innerHTML = `<span>${escapeHtml(icon)}</span>`;
+    return;
+  }
+}, true);
+
+
+document.querySelectorAll('[data-readmore]').forEach((wrap) => {
+  const description = wrap.querySelector('.media-description');
+  const button = wrap.querySelector('[data-readmore-toggle]');
+  if (!description || !button) return;
+
+  const hasOverflow = () => description.scrollHeight > description.clientHeight + 2;
+
+  requestAnimationFrame(() => {
+    if (hasOverflow()) wrap.classList.add('has-overflow');
+  });
+
+  button.addEventListener('click', () => {
+    const expanded = wrap.classList.toggle('is-expanded');
+    wrap.classList.toggle('is-collapsed', !expanded);
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    button.firstChild.nodeValue = expanded ? 'Show less ' : 'Read more ';
+  });
+});
+
+function getGraphColor(index) {
+  const colors = ['#d1a12c', '#6fa8dc', '#c94f4f', '#7cb342', '#b085c9', '#f39c5a', '#75c9c8', '#d8d8d8'];
+  return colors[index % colors.length];
+}
+
+function niceMax(value) {
+  const raw = Math.max(1, Number(value || 0));
+  const power = Math.pow(10, Math.floor(Math.log10(raw)));
+  return Math.ceil(raw / power) * power;
+}
+
+function graphHasData(chart) {
+  if (!chart) return false;
+  if (chart.type === 'line') {
+    return (chart.series || []).some((series) => (series.data || []).some((value) => Number(value || 0) > 0));
+  }
+  return (chart.values || []).some((value) => Number(value || 0) > 0);
+}
+
+function drawAxes(ctx, width, height, pad, maxValue) {
+  ctx.strokeStyle = 'rgba(255,255,255,.28)';
+  ctx.lineWidth = 1;
+  ctx.font = '12px Helvetica, Arial, sans-serif';
+  ctx.fillStyle = '#aaa';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i <= 4; i += 1) {
+    const y = pad.top + ((height - pad.top - pad.bottom) * i) / 4;
+    const value = maxValue - (maxValue * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(width - pad.right, y);
+    ctx.stroke();
+    ctx.fillText(value >= 10 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, ''), pad.left - 8, y);
+  }
+}
+
+function drawLegend(ctx, labels, width, height) {
+  let x = Math.max(60, width / 2 - labels.length * 46);
+  const y = height - 16;
+  ctx.font = '11px Helvetica, Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  labels.forEach((label, index) => {
+    ctx.fillStyle = getGraphColor(index);
+    ctx.fillRect(x, y - 3, 10, 3);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(String(label).slice(0, 24), x + 14, y);
+    x += Math.min(150, 38 + String(label).length * 6);
+  });
+}
+
+function drawLineChart(canvas, chart) {
+  const ctx = canvas.getContext('2d');
+  const rect = canvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(rect.width * scale);
+  canvas.height = Math.floor(rect.height * scale);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  const width = rect.width;
+  const height = rect.height;
+  const pad = { top: 22, right: 22, bottom: 54, left: 50 };
+  ctx.clearRect(0, 0, width, height);
+
+  const allValues = (chart.series || []).flatMap((series) => series.data || []).map(Number);
+  const maxValue = niceMax(Math.max(...allValues, 0));
+  drawAxes(ctx, width, height, pad, maxValue);
+
+  const labels = chart.labels || [];
+  const pointCount = Math.max(1, labels.length - 1);
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+
+  (chart.series || []).forEach((series, seriesIndex) => {
+    const data = series.data || [];
+    ctx.strokeStyle = getGraphColor(seriesIndex);
+    ctx.fillStyle = getGraphColor(seriesIndex);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach((raw, index) => {
+      const value = Number(raw || 0);
+      const x = pad.left + (plotWidth * index) / pointCount;
+      const y = pad.top + plotHeight - (plotHeight * value) / maxValue;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    data.forEach((raw, index) => {
+      const value = Number(raw || 0);
+      const x = pad.left + (plotWidth * index) / pointCount;
+      const y = pad.top + plotHeight - (plotHeight * value) / maxValue;
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '11px Helvetica, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const step = Math.max(1, Math.ceil(labels.length / 12));
+  labels.forEach((label, index) => {
+    if (index % step !== 0 && index !== labels.length - 1) return;
+    const x = pad.left + (plotWidth * index) / pointCount;
+    ctx.fillText(label, x, height - pad.bottom + 18);
+  });
+  drawLegend(ctx, (chart.series || []).map((series) => series.name), width, height);
+}
+
+function drawBarChart(canvas, chart) {
+  const ctx = canvas.getContext('2d');
+  const rect = canvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(rect.width * scale);
+  canvas.height = Math.floor(rect.height * scale);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  const width = rect.width;
+  const height = rect.height;
+  const pad = { top: 22, right: 20, bottom: 76, left: 50 };
+  const labels = chart.labels || [];
+  const values = (chart.values || []).map(Number);
+  const maxValue = niceMax(Math.max(...values, 0));
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const gap = Math.max(4, Math.min(12, plotWidth / Math.max(1, values.length) * 0.18));
+  const barWidth = Math.max(4, (plotWidth - gap * Math.max(0, values.length - 1)) / Math.max(1, values.length));
+
+  ctx.clearRect(0, 0, width, height);
+  drawAxes(ctx, width, height, pad, maxValue);
+
+  values.forEach((value, index) => {
+    const x = pad.left + index * (barWidth + gap);
+    const barHeight = (plotHeight * value) / maxValue;
+    const y = pad.top + plotHeight - barHeight;
+    ctx.fillStyle = getGraphColor(index);
+    ctx.fillRect(x, y, barWidth, barHeight);
+  });
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '11px Helvetica, Arial, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  labels.forEach((label, index) => {
+    const x = pad.left + index * (barWidth + gap) + barWidth / 2;
+    ctx.save();
+    ctx.translate(x, height - pad.bottom + 17);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(String(label).slice(0, 20), 0, 0);
+    ctx.restore();
+  });
+}
+
+function renderGraphs() {
+  const dataNode = document.getElementById('graphs-data');
+  if (!dataNode) return;
+  let charts = [];
+  try {
+    charts = JSON.parse(dataNode.textContent || '[]');
+  } catch (e) {
+    return;
+  }
+
+  document.querySelectorAll('.abs-graph[data-chart-index]').forEach((canvas) => {
+    const chart = charts[Number(canvas.dataset.chartIndex || 0)];
+    const card = canvas.closest('.graph-card');
+    if (!graphHasData(chart)) {
+      if (card) card.classList.add('is-empty');
+      return;
+    }
+    if (card) card.classList.remove('is-empty');
+    if (chart.type === 'line') drawLineChart(canvas, chart);
+    else drawBarChart(canvas, chart);
+  });
+}
+
+renderGraphs();
+window.addEventListener('resize', () => {
+  if (document.getElementById('graphs-data')) window.requestAnimationFrame(renderGraphs);
+});

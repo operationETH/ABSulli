@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Users</h1>
+    <p>Known Audiobookshelf users discovered from the API.</p>
+  </div>
+</section>
+
+<section class="stats-grid users-summary-grid">
+  <article class="stat-card" data-card-bg="linear-gradient(135deg,#756b91,#343044)">
+    <div class="stat-bg"></div>
+    <div class="stat-media"><span>●</span></div>
+    <div class="stat-body">
+      <h3>Known Users</h3>
+      <table class="stat-table">
+        <tbody>
+          {% for row in rows[:5] %}
+            <tr>
+              <td class="rank">{{ loop.index }}</td>
+              <td class="item-name" title="{{ row.display_name or row.username }}">
+                <a class="stat-link" href="/users/{{ row.username | urlencode }}">{{ row.display_name or row.username }}</a>
+              </td>
+              <td class="metric">{{ '✓' if row.is_active else '–' }}</td>
+            </tr>
+          {% else %}
+            <tr><td class="rank">–</td><td>No users yet</td><td class="metric">0</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>User List</h2></div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th>Username</th><th>Display Name</th><th>ABS User ID</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><a class="table-link" href="/users/{{ row.username | urlencode }}">{{ row.username }}</a></td>
+            <td>{{ row.display_name }}</td>
+            <td><code>{{ row.abs_user_id }}</code></td>
+            <td><span class="badge {{ 'good' if row.is_active else 'warn' }}">{{ 'Active' if row.is_active else 'Disabled' }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="empty">No users discovered yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ABSulli logo mark">
+  <g fill="none" stroke="#d4ad45" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 36h18c4 0 8 1.5 12 4.5C42 37.5 46 36 50 36h6v18H42c-4 0-8 1.8-10 5-2-3.2-6-5-10-5H8z"/>
+    <path d="M26 28v12"/>
+    <path d="M38 20v20"/>
+    <path d="M50 10v30"/>
+  </g>
+</svg>

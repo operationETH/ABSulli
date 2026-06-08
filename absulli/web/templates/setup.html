@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setup · {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card setup-card">
+      <div class="login-brand">
+        <span class="abs-mark"><span></span><span></span><span></span><span></span></span>
+        <h1>ABS<span>ULLI</span></h1>
+      </div>
+
+      <p class="muted setup-intro">Connect Audiobookshelf and create your admin login.</p>
+
+      {% if error %}
+      <div class="alert error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/setup" class="login-form setup-form" id="setup-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <label>
+          <span>
+            Audiobookshelf URL
+            {% if abs_url_from_env %}<em class="field-note">from .env</em>{% endif %}
+          </span>
+          <input
+            name="abs_url"
+            value="{{ abs_url }}"
+            {% if abs_url_from_env %}disabled readonly{% else %}required autofocus{% endif %}
+          >
+          {% if abs_url_from_env %}
+          <small class="field-help">This value is managed by ABS_URL in your .env file. Change .env and restart ABSulli to edit it.</small>
+          {% else %}
+          <small class="field-help">Use the URL you open Audiobookshelf with, for example http://192.168.1.50:13378.</small>
+          {% endif %}
+        </label>
+
+        <label>
+          <span>
+            Audiobookshelf API Key
+            {% if abs_api_key_from_env %}<em class="field-note">from .env</em>{% endif %}
+          </span>
+          {% if abs_api_key_from_env %}
+          <input
+            name="abs_api_key_display"
+            type="text"
+            value="Using API key from .env"
+            disabled
+            readonly
+          >
+          <small class="field-help">This value is managed by ABS_API_KEY in your .env file. The key is not shown or editable here.</small>
+          {% else %}
+          <input
+            name="abs_api_key"
+            type="password"
+            autocomplete="off"
+            required
+          >
+          {% endif %}
+        </label>
+
+        <div class="setup-test-row">
+          <button type="button" class="secondary-button setup-test-button" id="setup-test-connection">↕ Test connection</button>
+        </div>
+        <div class="setup-test-result" id="setup-test-result" aria-live="polite" hidden></div>
+
+        <label>
+          <span>
+            Admin username
+            {% if admin_login_from_env %}<em class="field-note">from env</em>{% endif %}
+          </span>
+          <input
+            name="admin_username"
+            value="{{ admin_username }}"
+            autocomplete="username"
+            {% if admin_login_from_env %}readonly{% endif %}
+            required
+          >
+        </label>
+
+        {% if admin_login_from_env %}
+        <p class="muted small">Using admin credentials from environment. Finish setup to save the Audiobookshelf connection.</p>
+        {% else %}
+        <label>
+          <span>Admin password</span>
+          <input name="admin_password" type="password" autocomplete="new-password" required>
+        </label>
+
+        <label>
+          <span>Confirm password</span>
+          <input name="confirm_password" type="password" autocomplete="new-password" required>
+        </label>
+        {% endif %}
+
+        <button type="submit">Finish setup</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

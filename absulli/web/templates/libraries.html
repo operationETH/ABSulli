@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Libraries</h1>
+    <p>{{ libraries|length }} synced Audiobookshelf librar{{ 'y' if libraries|length == 1 else 'ies' }}.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Library Overview</h2>
+    <a href="/">Back to dashboard</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Library</th>
+          <th>Type</th>
+          <th>Items</th>
+          <th>Last Played</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in libraries %}
+          <tr>
+            <td>
+              <a class="table-link" href="{{ row.url }}">
+                <span aria-hidden="true">{{ row.icon }}</span>
+                {{ row.library.name or 'Unknown library' }}
+              </a>
+            </td>
+            <td>{{ row.library.media_type or 'unknown' }}</td>
+            <td>{{ row.item_count }}</td>
+            <td>{{ row.recent_play or 'Never' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="empty">No libraries have been synced yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

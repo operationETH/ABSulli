@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <a href="/">Home</a>
+  <span>›</span>
+  <a href="/">Libraries</a>
+  <span>›</span>
+  <strong>{{ library.name }}</strong>
+</nav>
+
+<section class="library-hero">
+  <div class="library-icon">{{ library_icon }}</div>
+
+  <div class="library-summary">
+    <h1>{{ library.name }}</h1>
+
+    <div class="media-meta">
+      <span>{{ library.media_type or 'unknown' }}</span>
+      <span>{{ item_count }} item{{ '' if item_count == 1 else 's' }}</span>
+    </div>
+
+    <nav class="detail-tabs" aria-label="Library sections">
+      <a class="active" href="#profile">Profile</a>
+      <a href="#history">History</a>
+      <a href="#recently-played">Recently Played</a>
+      <a href="#recently-added">Recently Added</a>
+    </nav>
+  </div>
+</section>
+
+<section class="media-stat-section" id="profile">
+  <div class="panel-head plain-head">
+    <h2>Global Stats</h2>
+  </div>
+
+  <div class="global-stat-grid">
+    {% for stat in window_stats %}
+      <div class="global-stat-box">
+        <span>{{ stat.label }}</span>
+        <strong>{{ stat.plays }}</strong>
+        <em>plays</em>
+        <b>{{ stat.duration }}</b>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="media-stat-section">
+  <div class="panel-head plain-head">
+    <h2>User Stats</h2>
+  </div>
+
+  <div class="user-stat-grid">
+    {% for user in user_stats %}
+      <article class="user-stat-card">
+        <div class="user-avatar">{{ user.initial }}</div>
+        <div>
+          <h3>{{ user.username }}</h3>
+          <strong>{{ user.plays }}</strong><span> plays</span>
+          <p>{{ user.duration }}</p>
+        </div>
+      </article>
+    {% else %}
+      <div class="activity-empty">No user stats yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="library-split-grid">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Top Items</h2>
+      <a href="#history">View history</a>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table compact-data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Title</th>
+            <th>Plays</th>
+            <th>Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in top_items %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td>
+                {% if item.abs_item_id %}
+                  <a class="table-link" href="/media/{{ item.abs_item_id }}">{{ item.title }}</a>
+                {% else %}
+                  {{ item.title }}
+                {% endif %}
+              </td>
+              <td>{{ item.plays }}</td>
+              <td>{{ item.duration }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">No listening stats for this library yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Library Info</h2>
+    </div>
+
+    <div class="library-info-grid">
+      <div><span>Name</span><strong>{{ library.name }}</strong></div>
+      <div><span>Type</span><strong>{{ library.media_type or 'unknown' }}</strong></div>
+      <div><span>Items</span><strong>{{ item_count }}</strong></div>
+      <div><span>ABS ID</span><code>{{ library.abs_library_id }}</code></div>
+    </div>
+  </section>
+</section>
+
+<section class="author-list-section" id="recently-played">
+  <div class="panel-head plain-head">
+    <h2>Recently Played</h2>
+  </div>
+
+  <div class="author-book-rail" aria-label="Recently played in {{ library.name }}">
+    {% for item in recently_played %}
+      <article class="author-book-card">
+        <a class="recent-card-link" href="{{ '/media/' ~ item.abs_item_id if item.abs_item_id else '/history' }}" aria-label="View {{ item.title }}">
+          <div class="author-book-cover">
+            {% if item.abs_item_id %}
+              <img src="/covers/items/{{ item.abs_item_id }}?width=260" alt="{{ item.title }} cover" loading="lazy">
+            {% else %}
+              <span>{{ library_icon }}</span>
+            {% endif %}
+          </div>
+          <h3 title="{{ item.title }}">{{ item.title }}</h3>
+          <p title="{{ item.subtitle }}">{{ item.subtitle }}</p>
+          {% if item.when %}<span>{{ item.when.strftime('%m/%d/%Y') }}</span>{% endif %}
+        </a>
+      </article>
+    {% else %}
+      <div class="activity-empty">No recently played items for this library yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="author-list-section" id="recently-added">
+  <div class="panel-head plain-head">
+    <h2>Recently Added</h2>
+  </div>
+
+  <div class="author-book-rail" aria-label="Recently added to {{ library.name }}">
+    {% for item in items %}
+      <article class="author-book-card">
+        <a class="recent-card-link" href="/media/{{ item.abs_item_id }}" aria-label="View history for {{ item.title or 'Unknown title' }}">
+          <div class="author-book-cover">
+            {% if item.abs_item_id %}
+              <img src="/covers/items/{{ item.abs_item_id }}?width=260" alt="{{ item.title or 'Cover art' }} cover" loading="lazy">
+            {% else %}
+              <span>{{ library_icon }}</span>
+            {% endif %}
+          </div>
+          <h3 title="{{ item.title or 'Unknown title' }}">{{ item.title or "Unknown title" }}</h3>
+          <p title="{{ item.author or item.series or item.media_type or 'Unknown' }}">
+            {{ item.author or item.series or item.media_type or "Unknown" }}
+          </p>
+          {% if item.added_at %}<span>{{ item.added_at.strftime('%m/%d/%Y') }}</span>{% endif %}
+        </a>
+      </article>
+    {% else %}
+      <div class="activity-empty">No imported items found for this library yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel media-history-panel" id="history">
+  <div class="panel-head">
+    <h2>Listen History for {{ library.name }}</h2>
+    <a href="/history">View all history</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table media-history-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>User</th>
+          <th>Title</th>
+          <th>Platform</th>
+          <th>Device</th>
+          <th>Started</th>
+          <th>Updated</th>
+          <th>Progress</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.started_at.strftime('%Y-%m-%d') if row.started_at else row.imported_at.strftime('%Y-%m-%d') if row.imported_at else '' }}</td>
+            <td>{{ row.username or 'Unknown' }}</td>
+            <td>
+              {% if row.abs_item_id %}
+                <a class="table-link" href="/media/{{ row.abs_item_id }}">{{ row.title or 'Unknown title' }}</a>
+              {% else %}
+                {{ row.title or 'Unknown title' }}
+              {% endif %}
+            </td>
+            <td>{{ row.client or 'Unknown' }}</td>
+            <td>{{ row.device_name or row.model or row.device or 'Unknown' }}</td>
+            <td>{{ row.started_at.strftime('%H:%M') if row.started_at else '' }}</td>
+            <td>{{ row.updated_at.strftime('%H:%M') if row.updated_at else '' }}</td>
+            <td>{{ '%.1f'|format(row.progress or 0) }}%</td>
+            <td>{{ fmt_seconds(row.duration_seconds) }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="9" class="empty">No listening history imported for this library yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

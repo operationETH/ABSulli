@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name | default('ABSulli') }}</title>
+  <link rel="icon" href="/static/img/logo-mark.svg?v=2" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script defer nonce="{{ request.state.absulli_csp_nonce | default('') }}" src="/static/js/app.js"></script>
+</head>
+<body>
+  <header class="abs-topbar">
+    <a class="abs-brand" href="/" aria-label="ABSulli Home">
+      <img class="abs-logo-icon" src="/static/img/logo-mark.svg?v=2" alt="" aria-hidden="true">
+      <strong>ABS<span>ULLI</span></strong>
+    </a>
+    <form class="search-shell" role="search" action="/search" method="get">
+      <span>⌕</span><input aria-label="Search" name="q" value="{{ search_query | default('') }}" placeholder="Search history, users, titles..." autocomplete="off">
+    </form>
+    <nav class="abs-nav">
+      <a class="{{ 'active' if page == 'dashboard' else '' }}" href="/">⌂<span>Home</span></a>
+      <a class="{{ 'active' if page == 'activity' else '' }}" href="/activity">Activity</a>
+      <a class="{{ 'active' if page == 'users' else '' }}" href="/users">Users</a>
+      <a class="{{ 'active' if page == 'libraries' else '' }}" href="/libraries">Libraries</a>
+      <a class="{{ 'active' if page == 'history' else '' }}" href="/history">History</a>
+      <a class="{{ 'active' if page == 'graphs' else '' }}" href="/graphs">Graphs</a>
+      <a class="{{ 'active' if page == 'notifications' else '' }}" href="/notifications">Notifications</a>
+      <a class="{{ 'active' if page == 'settings' else '' }}" href="/settings">⚙</a>
+      {% if request.state.absulli_authenticated | default(false) %}<a class="logout-link" href="/logout">Logout</a>{% endif %}
+    </nav>
+  </header>
+  <main class="page-shell">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

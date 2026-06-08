@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <a href="/">Home</a>
+  <span>›</span>
+  <a href="/history">History</a>
+  <span>›</span>
+  <strong>{{ title }}</strong>
+</nav>
+
+<section class="media-hero" data-media-bg="/covers/items/{{ item_id }}?width=1000">
+  <div class="media-hero-shade"></div>
+
+  <div class="media-poster">
+    <img src="/covers/items/{{ item_id }}?width=420" alt="{{ title }} cover" loading="lazy">
+  </div>
+
+  <div class="media-summary">
+    <h1>{{ title }}</h1>
+
+    <div class="media-meta">
+      {% if author %}
+        <span><a href="{{ author_url }}">{{ author }}</a></span>
+      {% endif %}
+      {% if media_type %}<span>{{ media_type }}</span>{% endif %}
+      {% if library_name %}<span>{{ library_name }}</span>{% endif %}
+      {% if duration %}<span>{{ fmt_seconds(duration) }}</span>{% endif %}
+    </div>
+
+    {% if media_item and media_item.series %}
+      <p class="media-tagline">Series: {{ media_item.series }}</p>
+    {% endif %}
+
+    <p class="media-description">
+      Listening history, user stats, and recent sessions for this Audiobookshelf item.
+    </p>
+  </div>
+</section>
+
+<section class="media-stat-section">
+  <div class="panel-head plain-head">
+    <h2>Global Stats</h2>
+  </div>
+
+  <div class="global-stat-grid">
+    {% for stat in window_stats %}
+      <div class="global-stat-box">
+        <span>{{ stat.label }}</span>
+        <strong>{{ stat.plays }}</strong>
+        <em>plays</em>
+        <b>{{ stat.duration }}</b>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="media-stat-section">
+  <div class="panel-head plain-head">
+    <h2>User Stats</h2>
+  </div>
+
+  <div class="user-stat-grid">
+    {% for user in user_stats %}
+      <article class="user-stat-card">
+        <div class="user-avatar">{{ user.initial }}</div>
+        <div>
+          <h3>{{ user.username }}</h3>
+          <strong>{{ user.plays }}</strong><span> plays</span>
+          <p>{{ user.duration }}</p>
+        </div>
+      </article>
+    {% else %}
+      <div class="activity-empty">No user stats yet.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel media-history-panel">
+  <div class="panel-head">
+    <h2>Listen History for {{ title }}</h2>
+    <a href="/history">View all history</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table media-history-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>User</th>
+          <th>Platform</th>
+          <th>Device</th>
+          <th>Started</th>
+          <th>Updated</th>
+          <th>Progress</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.started_at.strftime('%Y-%m-%d') if row.started_at else row.imported_at.strftime('%Y-%m-%d') if row.imported_at else '' }}</td>
+            <td>{{ row.username or 'Unknown' }}</td>
+            <td>{{ row.client or 'Unknown' }}</td>
+            <td>{{ row.device_name or row.model or row.device or 'Unknown' }}</td>
+            <td>{{ row.started_at.strftime('%H:%M') if row.started_at else '' }}</td>
+            <td>{{ row.updated_at.strftime('%H:%M') if row.updated_at else '' }}</td>
+            <td>{{ '%.1f'|format(row.progress or 0) }}%</td>
+            <td>{{ fmt_seconds(row.duration_seconds) }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="empty">No listening history imported for this item yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

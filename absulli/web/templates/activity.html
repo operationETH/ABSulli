@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Activity</h1>
+    <p id="activity-page-summary">Current Audiobookshelf listening sessions.</p>
+  </div>
+</section>
+
+<div class="metric-strip">
+  <div class="metric-box"><span>Active</span><strong id="activity-active-count">{{ rows|length }}</strong></div>
+  <div class="metric-box"><span>Refresh</span><strong>Live</strong></div>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Current Activity</h2>
+    <span class="live-note" id="activity-last-refresh">Auto-refreshing</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>User</th>
+          <th>Title</th>
+          <th>Progress</th>
+          <th>Client</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody id="activity-table-body">
+        {% for row in rows %}
+          <tr>
+            <td><span class="status-dot green"></span>Active</td>
+            <td>{{ row.username }}</td>
+            <td>{% if row.abs_item_id %}<a class="table-link" href="/media/{{ row.abs_item_id }}">{{ row.title }}</a>{% else %}{{ row.title }}{% endif %}</td>
+            <td>{{ "%.1f"|format(row.progress or 0) }}%</td>
+            <td>{{ row.device or row.client }}</td>
+            <td>{{ row.last_seen_at }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="empty">No activity records yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

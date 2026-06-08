@@ -1,0 +1,9 @@
+services:
+  absulli:
+    image: ghcr.io/operationeth/absulli:latest
+    container_name: absulli
+    restart: unless-stopped
+    ports:
+      - "8272:8272"
+    volumes:
+      - ./data:/config

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Settings</h1>
+    <p>Environment-backed configuration. Edit <code>.env</code> and restart to change.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Application</h2></div>
+  <div class="settings-grid">
+    <div class="settings-item"><code>ABSULLI_VERSION</code><span>v{{ app_version }}</span></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Configuration</h2></div>
+  <div class="settings-grid">
+    {% for key, value in settings.items() %}
+    <div class="settings-item"><code>{{ key }}</code><span>{{ value }}</span></div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
