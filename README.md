@@ -1,16 +1,42 @@
 # ABSulli
 
-ABSulli is an Audiobookshelf monitoring tool inspired by the concept of [Tautulli](https://github.com/Tautulli/Tautulli). Track listening activity, browse library stats, and view history from one lightweight self-hosted web interface.
+> [!NOTE]
+> AI assistance was used during development of this project. The code has been reviewed and tested to the best of my ability, but users should review and validate it for their own environment before relying on it.
+
+ABSulli is an [Audiobookshelf](https://github.com/advplyr/audiobookshelf) monitoring tool inspired by the concept of [Tautulli](https://github.com/Tautulli/Tautulli). Track audiobook and podcast listening activity, browse library stats, and view history from one self-hosted web interface.
 
 ---
 
+## Features
+
+- First-run setup wizard - no config file needed to get started
+- Current listening activity
+- Library and user overview
+- Recently added media
+- Listening history
+- Local SQLite storage - no external database
+- Built-in login with rate limiting and audit logging
+- Optional environment variable configuration for Docker Compose or automation
+
+---
+## Screenshots
+
+![ABSulli Screenshot 1](screenshots/screenshot-absulli-homepage.png)
+![ABSulli Screenshot 2](screenshots/screenshot-absulli-homepage-with-activity.png)
+![ABSulli Screenshot 3](screenshots/screenshot-absulli-book-page.png)
+![ABSulli Screenshot 4](screenshots/screenshot-absulli-author-page.png)
+![ABSulli Screenshot 5](screenshots/screenshot-absulli-libraries-page.png)
+![ABSulli Screenshot 6](screenshots/screenshot-absulli-libraries-page-2.png)
+![ABSulli Screenshot 7](screenshots/screenshot-absulli-graphs.png)
+
+---
 ## Quick start
+### docker-compose.yml
 
 ```yaml
-# docker-compose.yml
 services:
   absulli:
-    image: ghcr.io/yourname/absulli:latest
+    image: ghcr.io/operationeth/absulli:latest
     container_name: absulli
     restart: unless-stopped
     ports:
@@ -29,22 +55,9 @@ The wizard will ask for your Audiobookshelf URL and API key, create an admin log
 
 ---
 
-## Features
-
-- First-run setup wizard - no config file needed to get started
-- Current listening activity
-- Library and user overview
-- Recently added media
-- Listening history
-- Local SQLite storage - no external database
-- Built-in login with rate limiting and audit logging
-- Optional environment variable configuration for Docker Compose or automation
-
----
-
 ## Getting your Audiobookshelf API key
 
-1. Open Audiobookshelf and go to **Settings → api-keys → add api key**
+1. Open Audiobookshelf and go to **Settings → API-keys → add API key**
 2. Name ABSulli
 3. Select your admin user
 4. Copy the API token from the token field
@@ -62,7 +75,6 @@ ABS_API_KEY=your_abs_api_key_here
 
 When these are set, the setup wizard shows them as read-only and uses them automatically.
 
-See [docs/configuration.md](docs/configuration.md) for the full list of environment variables including auth, HTTPS, CORS, notifications, and tuning options.
 
 ---
 
@@ -119,4 +131,4 @@ ABSulli is under active development. Database schema changes are handled with Al
 
 ## License
 
-MIT
+GPL-3.0 license
