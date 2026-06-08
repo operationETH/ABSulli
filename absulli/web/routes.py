@@ -131,9 +131,9 @@ def setup_page(request: Request):
     settings = get_settings()
     csrf_token = create_csrf_token()
     response = templates.TemplateResponse(
+        request,
         "setup.html",
         {
-            "request": request,
             "app_name": settings.app_name,
             "abs_url": settings.effective_abs_url if settings.abs_url_from_env else "",
             "abs_url_from_env": settings.abs_url_from_env,
@@ -251,9 +251,9 @@ def setup_submit(
     def render_error(message: str, status_code: int = 400):
         new_csrf_token = create_csrf_token()
         response = templates.TemplateResponse(
+            request,
             "setup.html",
             {
-                "request": request,
                 "app_name": settings.app_name,
                 "abs_url": settings.effective_abs_url if settings.abs_url_from_env else (abs_url or "").strip(),
                 "abs_url_from_env": settings.abs_url_from_env,
@@ -324,9 +324,9 @@ def login_page(request: Request, next: str = "/"):
 
     csrf_token = create_csrf_token()
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {
-            "request": request,
             "app_name": settings.app_name,
             "next": safe_next_url(next),
             "csrf_token": csrf_token,
@@ -353,9 +353,9 @@ def login_submit(
         record_login_event(request, username=username, success=False, reason="csrf_failed")
         new_csrf_token = create_csrf_token()
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "app_name": settings.app_name,
                 "next": target,
                 "csrf_token": new_csrf_token,
@@ -371,9 +371,9 @@ def login_submit(
         record_login_event(request, username=username, success=False, reason="rate_limited")
         retry_after = login_retry_after_seconds(request)
         return templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "app_name": settings.app_name,
                 "next": target,
                 "csrf_token": csrf_token,
@@ -396,9 +396,9 @@ def login_submit(
     record_login_failure(request)
     record_login_event(request, username=username, success=False, reason="invalid_credentials")
     return templates.TemplateResponse(
+        request,
         "login.html",
         {
-            "request": request,
             "app_name": settings.app_name,
             "next": target,
             "csrf_token": csrf_token,
@@ -556,9 +556,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "app_name": settings.app_name,
             "active": active,
             "history_count": history_count,
@@ -581,13 +581,13 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 def activity(request: Request, db: Session = Depends(get_db)):
     rows = active_sessions_query(db).order_by(desc(ActivitySession.last_seen_at)).limit(100).all()
     enrich_active_rows(db, rows)
-    return templates.TemplateResponse("activity.html", {"request": request, "rows": rows, "page": "activity"})
+    return templates.TemplateResponse(request, "activity.html", {"rows": rows, "page": "activity"})
 
 
 @router.get("/history", response_class=HTMLResponse)
 def history(request: Request, db: Session = Depends(get_db)):
     rows = db.query(ListeningHistory).order_by(desc(media_history_date())).limit(250).all()
-    return templates.TemplateResponse("history.html", {"request": request, "rows": rows, "page": "history", "fmt_seconds": fmt_seconds})
+    return templates.TemplateResponse(request, "history.html", {"rows": rows, "page": "history", "fmt_seconds": fmt_seconds})
 
 
 
@@ -613,9 +613,9 @@ def libraries(request: Request, db: Session = Depends(get_db)):
         )
 
     return templates.TemplateResponse(
+        request,
         "libraries.html",
         {
-            "request": request,
             "page": "libraries",
             "libraries": rows,
             "fmt_seconds": fmt_seconds,
@@ -634,9 +634,9 @@ def library_detail(library_id: str, request: Request, db: Session = Depends(get_
     item_count = max(int(library.item_count or 0), db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).count())
 
     return templates.TemplateResponse(
+        request,
         "library_detail.html",
         {
-            "request": request,
             "page": "dashboard",
             "library": library,
             "library_icon": library_icon(library.media_type),
@@ -684,9 +684,9 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
     )
 
     return templates.TemplateResponse(
+        request,
         "author_detail.html",
         {
-            "request": request,
             "page": "history",
             "author": author_name,
             "author_id": author_id,
@@ -727,9 +727,9 @@ def media_detail(item_id: str, request: Request, db: Session = Depends(get_db)):
     duration = (media_item.duration if media_item else 0) or 0
 
     return templates.TemplateResponse(
+        request,
         "media_detail.html",
         {
-            "request": request,
             "page": "history",
             "item_id": item_id,
             "title": title,
@@ -750,7 +750,7 @@ def media_detail(item_id: str, request: Request, db: Session = Depends(get_db)):
 @router.get("/users", response_class=HTMLResponse)
 def users(request: Request, db: Session = Depends(get_db)):
     rows = db.query(AbsUser).order_by(AbsUser.username).all()
-    return templates.TemplateResponse("users.html", {"request": request, "rows": rows, "page": "users"})
+    return templates.TemplateResponse(request, "users.html", {"rows": rows, "page": "users"})
 
 
 @router.get("/users/{user_key:path}", response_class=HTMLResponse)
@@ -763,9 +763,9 @@ def user_detail(user_key: str, request: Request, db: Session = Depends(get_db)):
 
     display_name = user_display_name(user, user_key)
     return templates.TemplateResponse(
+        request,
         "user_detail.html",
         {
-            "request": request,
             "page": "users",
             "user": user,
             "user_key": user_key,
@@ -848,9 +848,9 @@ def search(request: Request, q: str = "", db: Session = Depends(get_db)):
         )
 
     return templates.TemplateResponse(
+        request,
         "search.html",
         {
-            "request": request,
             "page": "search",
             "search_query": query,
             "media_items": media_items,
@@ -873,9 +873,9 @@ def graphs(request: Request, db: Session = Depends(get_db)):
     users = db.query(AbsUser).order_by(AbsUser.username.asc()).all()
     graph_data = build_graphs(db, stat_metric, stat_days, selected_user)
     return templates.TemplateResponse(
+        request,
         "graphs.html",
         {
-            "request": request,
             "page": "graphs",
             "stat_metric": stat_metric,
             "stat_days": stat_days,
@@ -896,10 +896,10 @@ def settings_page(request: Request):
         "GOTIFY_ENABLED": bool(settings.gotify_url and settings.gotify_token),
         "WEBHOOK_ENABLED": bool(settings.webhook_url),
     }
-    return templates.TemplateResponse("settings.html", {"request": request, "settings": safe, "page": "settings", "app_version": __version__})
+    return templates.TemplateResponse(request, "settings.html", {"settings": safe, "page": "settings", "app_version": __version__})
 
 
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications(request: Request, db: Session = Depends(get_db)):
     rows = db.query(NotificationEvent).order_by(desc(NotificationEvent.created_at)).limit(200).all()
-    return templates.TemplateResponse("notifications.html", {"request": request, "rows": rows, "page": "notifications"})
+    return templates.TemplateResponse(request, "notifications.html", {"rows": rows, "page": "notifications"})
