@@ -423,7 +423,7 @@ def general_values_from_form(settings, form) -> dict[str, str]:
     if not values.get("abs_api_key") or values.get("abs_api_key") == "change_me":
         raise ValueError("Audiobookshelf API key is required")
     values["abs_request_timeout"] = clean_int_range(values.get("abs_request_timeout", ""), "Request timeout", 1, 300)
-    values["abs_poll_interval"] = clean_int_range(values.get("abs_poll_interval", ""), "Activity poll interval", 5, 86400)
+    values["abs_poll_interval"] = clean_int_range(values.get("abs_poll_interval", ""), "Activity poll interval", 3, 3600)
     values["abs_history_poll_interval"] = clean_int_range(values.get("abs_history_poll_interval", ""), "History poll interval", 60, 86400)
     return values
 

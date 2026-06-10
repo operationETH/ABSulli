@@ -125,7 +125,7 @@ def test_general_settings_save_rejects_invalid_values(monkeypatch):
         follow_redirects=False,
     )
     assert bad_interval.status_code == 303
-    assert "Activity%20poll%20interval%20must%20be%20between%205%20and%2086400" in bad_interval.headers["location"]
+    assert "Activity%20poll%20interval%20must%20be%20between%203%20and%203600" in bad_interval.headers["location"]
     assert store == {"abs_api_key": "saved-key"}
 
 

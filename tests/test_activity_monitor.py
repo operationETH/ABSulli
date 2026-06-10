@@ -147,6 +147,56 @@ def test_poll_updates_existing_session_without_duplicate_start_notification():
     db.close()
 
 
+
+def test_poll_reactivated_existing_session_notifies_start():
+    db = make_db()
+    db.add(
+        ActivitySession(
+            session_key="session-1",
+            abs_user_id="user-1",
+            username="Old User",
+            abs_item_id="item-1",
+            title="Old Title",
+            current_time=10,
+            duration=100,
+            progress=10,
+            is_active=False,
+            last_seen_at=utcnow() - timedelta(seconds=90),
+        )
+    )
+    db.commit()
+
+    notifier = FakeNotifier()
+    monitor = ActivityMonitor(
+        FakeClient(
+            online_payload(
+                online_session(
+                    username="Updated User",
+                    displayTitle="Updated Title",
+                    currentTime=75,
+                    duration=100,
+                )
+            )
+        ),
+        notifier,
+    )
+
+    count = asyncio.run(monitor.poll(db))
+
+    row = db.query(ActivitySession).filter_by(session_key="session-1").one()
+    assert count == 1
+    assert row.is_active is True
+    assert row.username == "Updated User"
+    assert row.title == "Updated Title"
+    assert notifier.events == [
+        {
+            "event_type": "playback_start",
+            "title": "Updated User started listening",
+            "body": "Updated Title",
+        }
+    ]
+    db.close()
+
 def test_poll_marks_stale_missing_sessions_inactive_and_notifies_stop():
     db = make_db()
     db.add(

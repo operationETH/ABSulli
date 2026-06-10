@@ -47,8 +47,8 @@
             </td>
             <td>{{ row.media_type }}</td>
             <td>{{ fmt_seconds(row.duration_seconds) }}</td>
-            <td>{{ row.started_at or '' }}</td>
-            <td>{{ row.imported_at }}</td>
+            <td>{{ row.started_at|local_datetime }}</td>
+            <td>{{ row.imported_at|local_datetime }}</td>
           </tr>
         {% else %}
           <tr>

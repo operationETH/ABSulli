@@ -142,7 +142,7 @@
       <tbody>
         {% for row in rows %}
           <tr>
-            <td>{{ row.started_at.strftime('%Y-%m-%d') if row.started_at else row.imported_at.strftime('%Y-%m-%d') if row.imported_at else '' }}</td>
+            <td>{{ (row.started_at or row.imported_at)|local_date }}</td>
             <td>
               {% set user_url = history_user_url(row) %}
               {% if user_url %}
@@ -160,8 +160,8 @@
             </td>
             <td>{{ row.client or 'Unknown' }}</td>
             <td>{{ row.device_name or row.model or row.device or 'Unknown' }}</td>
-            <td>{{ row.started_at.strftime('%H:%M') if row.started_at else '' }}</td>
-            <td>{{ row.updated_at.strftime('%H:%M') if row.updated_at else '' }}</td>
+            <td>{{ row.started_at|local_time }}</td>
+            <td>{{ row.updated_at|local_time }}</td>
             <td>{{ '%.1f'|format(row.progress or 0) }}%</td>
             <td>{{ fmt_seconds(row.duration_seconds) }}</td>
           </tr>

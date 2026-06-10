@@ -1,25 +1,27 @@
 # ABSulli
 
 > [!NOTE]
-> AI assistance was used during development of this project. The code has been reviewed and tested to the best of my ability, but users should review and validate it for their own environment before relying on it.
+> AI assistance was used during development of this project. The code has been reviewed and tested to the best of my ability, but ABSulli is still under active development. Users should review and validate it for their own environment before relying on it. If you find a bug, please open an [issue](https://github.com/operationETH/ABSulli/issues).
 
-ABSulli is an [Audiobookshelf](https://github.com/advplyr/audiobookshelf) monitoring tool inspired by the concept of [Tautulli](https://github.com/Tautulli/Tautulli). Track audiobook and podcast listening activity, browse library stats, and view history from one self-hosted web interface.
+ABSulli is an [Audiobookshelf](https://github.com/advplyr/audiobookshelf) companion dashboard inspired by the concept of [Tautulli](https://github.com/Tautulli/Tautulli). Track audiobook and podcast listening activity, browse library stats, view history, manage notifications, and expose Prometheus metrics from one self-hosted web interface.
 
 ---
 
 ## Features
 
 - First-run setup wizard - no config file needed to get started
+- GUI settings management with optional environment variable overrides
 - Current listening activity
 - Library and user overview
 - Recently added media
 - Listening history
+- Built-in graphs and Prometheus metrics endpoint
 - Notification support (Gotify, ntfy, Discord, Slack, Telegram, Pushover, Pushbullet, Email, Webhook)
 - Local SQLite storage - no external database
 - Built-in login with rate limiting and audit logging
-- Optional environment variable configuration for Docker Compose or automation
 
 ---
+
 ## Screenshots
 
 ![ABSulli Screenshot 1](screenshots/screenshot-absulli-homepage.png)
@@ -31,7 +33,9 @@ ABSulli is an [Audiobookshelf](https://github.com/advplyr/audiobookshelf) monito
 ![ABSulli Screenshot 7](screenshots/screenshot-absulli-graphs.png)
 
 ---
+
 ## Quick start
+
 ### docker-compose.yml
 
 ```yaml
@@ -42,6 +46,10 @@ services:
     restart: unless-stopped
     ports:
       - "8272:8272"
+    environment:
+      - TZ=America/Phoenix
+      - PUID=1000
+      - PGID=1000
     volumes:
       - ./data:/config
 ```
@@ -60,7 +68,7 @@ After setup, all connection and notification settings can be managed from the **
 
 ## Getting your Audiobookshelf API key
 
-1. Open Audiobookshelf and go to **Settings → API-keys → add API key**
+1. Open Audiobookshelf and go to **Settings → API-keys → Add API Key**
 2. Name ABSulli
 3. Select your admin user
 4. Copy the API token from the token field
@@ -78,6 +86,13 @@ ABS_API_KEY=your_abs_api_key_here
 
 When these are set, the setup wizard shows them as read-only and uses them automatically.
 
+---
+
+## Prometheus metrics
+
+ABSulli exposes Prometheus metrics at `/metrics`. This can be scraped by Prometheus for Grafana dashboards or external monitoring.
+
+If you configure a metrics token, include it as a bearer token or with the `X-Absulli-Metrics-Token` header. The metrics token can be configured in Settings → Network.
 
 ---
 
@@ -90,10 +105,9 @@ ABSulli stores all data locally in `/config`:
 | `absulli.db` | SQLite database - activity, history, settings |
 | `secret_key` | Session signing key - keep private |
 
-No data is sent anywhere outside your network. ABSulli only communicates with your Audiobookshelf instance.
+By default, no data is sent anywhere outside your network. ABSulli communicates with your Audiobookshelf instance, and only sends outbound notification requests if you configure notification agents.
 
 ---
-
 
 ## Upgrading
 
@@ -131,7 +145,7 @@ Existing installs created before Alembic are safely baselined on first start: AB
 
 ## Reverse proxy
 
-ABSulli runs on port `8272` by default. To put it behind Nginx or Traefik, proxy to `http://absulli:8272` and set `ABSULLI_COOKIE_SECURE=true` in your `.env` if serving over HTTPS.
+ABSulli runs on port `8272` by default. To put it behind Nginx or Traefik, proxy to `http://absulli:8272` and set `ABSULLI_COOKIE_SECURE=true` in your `.env` or enable "HTTPS Secure Cookies" in Settings → Network if serving over HTTPS.
 
 ABSulli sets its own security headers (`Content-Security-Policy`, `X-Frame-Options`, `Referrer-Policy`, etc.) on every response. You do not need to add these in your proxy config.
 
@@ -149,16 +163,10 @@ ABSulli ships with the following enabled by default:
 - CSRF protection on all form submissions
 - Separate API and metrics tokens with independent scopes
 
-Authentication is enabled by default and recommended for all installs.
-
----
-
-## Project status
-
-ABSulli is under active development. Database schema changes are handled with Alembic migrations, but you should still keep a backup of `/config/absulli.db` before upgrading.
+Authentication is required after setup and recommended for all installs.
 
 ---
 
 ## License
 
-GPL-3.0 license
+GPL-3.0 License

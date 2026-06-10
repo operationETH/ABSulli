@@ -308,7 +308,7 @@ class Settings(BaseSettings):
 
     @property
     def effective_abs_poll_interval(self) -> int:
-        return self.effective_int_setting("abs_poll_interval", default=15, minimum=5, maximum=86400)
+        return self.effective_int_setting("abs_poll_interval", default=15, minimum=3, maximum=3600)
 
     @property
     def effective_abs_history_poll_interval(self) -> int:

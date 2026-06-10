@@ -72,6 +72,7 @@ class ActivityMonitor:
 
         for session in sessions:
             existing = existing_sessions.get(session["session_key"])
+            was_active = bool(existing and existing.is_active)
             if existing:
                 for key, value in session.items():
                     setattr(existing, key, value)
@@ -80,6 +81,8 @@ class ActivityMonitor:
             else:
                 existing = ActivitySession(is_active=True, **session)
                 db.add(existing)
+
+            if not was_active:
                 await self.notifier.notify(
                     db,
                     "playback_start",
