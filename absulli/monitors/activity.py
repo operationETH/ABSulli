@@ -35,7 +35,10 @@ class ActivityMonitor:
                 session["library_id"] = session.get("library_id") or item.library_id or ""
                 session["library_name"] = session.get("library_name") or item.library_name or ""
                 session["author"] = session.get("author") or item.author or ""
-                session["media_type"] = session.get("media_type") or item.media_type or "unknown"
+                if session.get("media_type") in ("", "unknown") and item.media_type:
+                    session["media_type"] = item.media_type
+                else:
+                    session["media_type"] = session.get("media_type") or "unknown"
                 if session.get("title") in ("", "Unknown") and item.title:
                     session["title"] = item.title
 
@@ -56,9 +59,19 @@ class ActivityMonitor:
 
         active_keys = {session["session_key"] for session in sessions}
         now = utcnow()
+        existing_sessions = {
+            row.session_key: row
+            for row in (
+                db.query(ActivitySession)
+                .filter(ActivitySession.session_key.in_(active_keys))
+                .all()
+                if active_keys
+                else []
+            )
+        }
 
         for session in sessions:
-            existing = db.query(ActivitySession).filter_by(session_key=session["session_key"]).first()
+            existing = existing_sessions.get(session["session_key"])
             if existing:
                 for key, value in session.items():
                     setattr(existing, key, value)
@@ -75,16 +88,21 @@ class ActivityMonitor:
                 )
 
         stale_cutoff = now - timedelta(seconds=45)
-        stale = db.query(ActivitySession).filter(ActivitySession.is_active.is_(True)).all()
-        for row in stale:
-            if row.session_key not in active_keys and row.last_seen_at < stale_cutoff:
-                row.is_active = False
-                await self.notifier.notify(
-                    db,
-                    "playback_stop",
-                    f"{row.username} stopped listening",
-                    row.title,
-                )
+        stale_query = db.query(ActivitySession).filter(
+            ActivitySession.is_active.is_(True),
+            ActivitySession.last_seen_at < stale_cutoff,
+        )
+        if active_keys:
+            stale_query = stale_query.filter(~ActivitySession.session_key.in_(active_keys))
+
+        for row in stale_query.all():
+            row.is_active = False
+            await self.notifier.notify(
+                db,
+                "playback_stop",
+                f"{row.username} stopped listening",
+                row.title,
+            )
 
         db.commit()
         return len(sessions)

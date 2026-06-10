@@ -62,14 +62,6 @@ def parse_ts(value: Any) -> datetime | None:
     return None
 
 
-def ts_seconds(value: datetime | None) -> float:
-    if not value:
-        return 0
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.timestamp()
-
-
 def clamp_percent(value: float) -> float:
     if value < 0:
         return 0
@@ -265,7 +257,6 @@ def normalize_media_item_payload(payload: dict[str, Any] | list[Any], library_id
                 "year": safe_text(metadata.get("publishedYear") or metadata.get("releaseDate") or metadata.get("publishedDate") or ""),
                 "duration": safe_float(media.get("duration") or row.get("duration")),
                 "size_bytes": safe_float(row.get("size") or row.get("sizeBytes") or media.get("size")),
-                "cover_url": safe_text(row.get("coverPath") or media.get("coverPath") or ""),
                 "added_at": added_at,
             }
         )
@@ -305,7 +296,6 @@ def normalize_history_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "current_time": current_time,
                 "progress": clamp_percent(progress),
                 **device_fields,
-                "raw_json": row,
             }
         )
     return [row for row in normalized if row["abs_session_id"]]

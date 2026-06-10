@@ -20,25 +20,30 @@ class AudiobookshelfClient:
     async def __aexit__(self, *args: object) -> None:
         await self.aclose()
 
-    def _base_url(self) -> str:
-        return self.settings.effective_abs_url
+    def _base_url(self, override: str | None = None) -> str:
+        return (override or self.settings.effective_abs_url).strip().rstrip("/")
 
-    def _api_key(self) -> str:
-        return (self.settings.effective_abs_api_key or "").strip()
+    def _api_key(self, override: str | None = None) -> str:
+        return (override or self.settings.effective_abs_api_key or "").strip()
 
-    def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._api_key()}"}
-
-    def _current_client_config(self) -> tuple[str, str, int, bool]:
+    def _current_client_config(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> tuple[str, str, int, bool]:
         return (
-            self._base_url(),
-            self._api_key(),
-            int(self.settings.abs_request_timeout),
-            bool(self.settings.abs_verify_ssl),
+            self._base_url(base_url),
+            self._api_key(api_key),
+            int(self.settings.effective_abs_request_timeout),
+            bool(self.settings.effective_abs_verify_ssl),
         )
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        base_url, api_key, timeout, verify_ssl = self._current_client_config()
+    async def _get_client(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> httpx.AsyncClient:
+        base_url, api_key, timeout, verify_ssl = self._current_client_config(base_url, api_key)
         if not api_key or api_key == "change_me":
             raise RuntimeError("ABS_API_KEY is not configured")
 
@@ -62,30 +67,39 @@ class AudiobookshelfClient:
         self._client = None
         self._client_config = None
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        client = await self._get_client()
+    async def _get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> Any:
+        client = await self._get_client(base_url=base_url, api_key=api_key)
         response = await client.get(path, params=params)
         response.raise_for_status()
         return response.json()
 
-    async def _get_optional(self, path: str, params: dict[str, Any] | None = None) -> Any | None:
+    async def _get_optional(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> Any | None:
         try:
-            return await self._get(path, params=params)
+            return await self._get(path, params=params, base_url=base_url, api_key=api_key)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return None
             raise
 
-    async def ping(self) -> bool:
+    async def test_connection(self, base_url: str, api_key: str) -> None:
         try:
-            await self._get("/api/me")
-            return True
-        except Exception as exc:
-            log.warning("Audiobookshelf ping failed: %s", exc)
-            return False
-
-    async def get_me(self) -> dict[str, Any]:
-        return await self._get("/api/me")
+            await self._get("/api/me", base_url=base_url, api_key=api_key)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+            await self._get("/api/libraries", base_url=base_url, api_key=api_key)
 
     async def get_online_users(self) -> dict[str, Any] | list[Any]:
         return await self._get("/api/users/online")
@@ -207,8 +221,13 @@ class AudiobookshelfClient:
             params={"limit": limit, "page": 0, "sort": "addedAt", "desc": 1},
         )
 
-    async def get_user_listening_sessions(self, user_id: str, items_per_page: int = 50) -> dict[str, Any]:
+    async def get_user_listening_sessions(
+        self,
+        user_id: str,
+        items_per_page: int = 50,
+        page: int = 0,
+    ) -> dict[str, Any]:
         return await self._get(
             f"/api/users/{user_id}/listening-sessions",
-            params={"itemsPerPage": items_per_page},
+            params={"itemsPerPage": items_per_page, "page": page},
         )

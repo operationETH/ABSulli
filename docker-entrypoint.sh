@@ -1,22 +1,31 @@
-#!/usr/bin/env sh
+#!/bin/sh
 set -eu
 
+ABSULLI_HOST="${ABSULLI_HOST:-0.0.0.0}"
+ABSULLI_PORT="${ABSULLI_PORT:-8272}"
+ABSULLI_DATA_DIR="${ABSULLI_DATA_DIR:-/config}"
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
-CONFIG_DIR="${ABSULLI_CONFIG_DIR:-/config}"
 
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$ABSULLI_DATA_DIR"
 
-# Match the internal app user to the requested host UID/GID.
-groupmod -o -g "$PGID" absulli
-usermod -o -u "$PUID" -g "$PGID" absulli
+if [ "$(id -u)" = "0" ]; then
+    groupmod --gid "$PGID" absulli 2>/dev/null || true
+    usermod --uid "$PUID" --gid "$PGID" absulli 2>/dev/null || true
+    chown -R absulli:absulli "$ABSULLI_DATA_DIR"
 
-# Make bind-mounted config folders writable on first run.
-# This lets Docker create the host folder as root, then the entrypoint fixes it.
-if [ -d "$CONFIG_DIR" ]; then
-    find "$CONFIG_DIR" \! \( -uid "$(id -u absulli)" -gid "$(id -g absulli)" \) -print0 | xargs -0r chown absulli:absulli
+    echo "Running ABSulli using user absulli (uid=$(id -u absulli)) and group absulli (gid=$(id -g absulli))"
+    USER_PREFIX="gosu absulli"
+else
+    echo "Running ABSulli using current user (uid=$(id -u)) and group (gid=$(id -g))"
+    USER_PREFIX=""
 fi
 
-echo "Running ABSulli using user absulli (uid=$(id -u absulli)) and group absulli (gid=$(id -g absulli))"
+if [ "$#" -ge 1 ] && [ "$1" = "uvicorn" ]; then
+    exec $USER_PREFIX uvicorn absulli.main:app \
+        --host "$ABSULLI_HOST" \
+        --port "$ABSULLI_PORT" \
+        --no-server-header
+fi
 
-exec gosu absulli "$@"
+exec $USER_PREFIX "$@"

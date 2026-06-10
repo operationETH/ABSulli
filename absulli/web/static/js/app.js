@@ -302,6 +302,79 @@ function initializeSetupConnectionTest(root = document) {
   });
 }
 
+function initializeGeneralSettingsTest(root = document) {
+  const form = root.getElementById ? root.getElementById('general-settings-form') : document.getElementById('general-settings-form');
+  const button = root.getElementById ? root.getElementById('general-test-connection') : document.getElementById('general-test-connection');
+  const result = root.getElementById ? root.getElementById('general-test-result') : document.getElementById('general-test-result');
+  if (!form || !button || !result) return;
+
+  const showResult = (state, message) => {
+    result.hidden = false;
+    result.className = `setup-test-result ${state}`;
+    result.textContent = message;
+  };
+
+  button.addEventListener('click', async () => {
+    showResult('is-loading', '↕ Testing connection...');
+    button.disabled = true;
+
+    try {
+      const response = await fetch('/settings/general/test', {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+      const ok = response.ok && data.ok;
+      showResult(ok ? 'is-success' : 'is-error', data.message || (ok ? '✓ Connection successful!' : '⚠ Connection failed.'));
+    } catch (e) {
+      showResult('is-error', '⚠ Connection test failed. Check the URL and network.');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+function initializeNotificationAgentSettings(root = document) {
+  const buttons = Array.from(root.querySelectorAll('[data-agent-test]'));
+  buttons.forEach((button) => {
+    const agentId = button.dataset.agentTest;
+    const form = root.querySelector(`[data-agent-form="${agentId}"]`);
+    const result = root.getElementById ? root.getElementById(`${agentId}-test-result`) : document.getElementById(`${agentId}-test-result`);
+    if (!form || !result) return;
+
+    const showResult = (state, message) => {
+      result.hidden = false;
+      result.className = `setup-test-result ${state}`;
+      result.textContent = message;
+    };
+
+    button.addEventListener('click', async () => {
+      showResult('is-loading', '↕ Sending test notification...');
+      button.disabled = true;
+
+      try {
+        const response = await fetch(`/settings/notifications/${agentId}/test`, {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json' },
+        });
+        const data = await response.json().catch(() => ({}));
+        const ok = response.ok && data.ok;
+        showResult(ok ? 'is-success' : 'is-error', data.message || (ok ? '✓ Test notification sent.' : '⚠ Test failed.'));
+      } catch (e) {
+        showResult('is-error', '⚠ Test failed. Check the settings and network.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+}
+
 function startLiveActivityRefresh() {
   initializeCardBackgrounds();
   initializeMediaBackgrounds();
@@ -309,6 +382,8 @@ function startLiveActivityRefresh() {
   initializeHoverCovers();
   initializeStaticProgressBars();
   initializeSetupConnectionTest();
+  initializeGeneralSettingsTest();
+  initializeNotificationAgentSettings();
   refreshStatus();
   refreshLiveActivity();
   setInterval(refreshStatus, 30000);
@@ -541,3 +616,26 @@ renderGraphs();
 window.addEventListener('resize', () => {
   if (document.getElementById('graphs-data')) window.requestAnimationFrame(renderGraphs);
 });
+
+function initializeNotificationAgentTabs(root = document) {
+  const tabs = Array.from(root.querySelectorAll('[data-agent-tab]'));
+  if (!tabs.length) return;
+
+  const panels = Array.from(root.querySelectorAll('[data-agent-panel]'));
+  const activate = (agentId) => {
+    tabs.forEach((tab) => {
+      const active = tab.dataset.agentTab === agentId;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    panels.forEach((panel) => {
+      panel.classList.toggle('active', panel.dataset.agentPanel === agentId);
+    });
+  };
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => activate(tab.dataset.agentTab || 'gotify'));
+  });
+}
+
+initializeNotificationAgentTabs();

@@ -56,7 +56,6 @@ class MediaItem(Base):
     year: Mapped[str] = mapped_column(String(64), default="")
     duration: Mapped[float] = mapped_column(Float, default=0)
     size_bytes: Mapped[float] = mapped_column(Float, default=0)
-    cover_url: Mapped[str] = mapped_column(Text, default="")
     added_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -113,7 +112,6 @@ class ListeningHistory(Base):
     device_name: Mapped[str] = mapped_column(String(255), default="")
     model: Mapped[str] = mapped_column(String(255), default="")
     client: Mapped[str] = mapped_column(String(255), default="")
-    raw_json: Mapped[str] = mapped_column(Text, default="{}")
     imported_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

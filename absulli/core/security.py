@@ -69,7 +69,7 @@ def _security_raw_headers(nonce: str | None = None) -> list[tuple[bytes, bytes]]
         (b"cross-origin-resource-policy", b"same-origin"),
     ]
 
-    if settings.security_csp_enabled:
+    if settings.effective_security_csp_enabled:
         raw_headers.append(
             (
                 b"content-security-policy",
@@ -77,13 +77,13 @@ def _security_raw_headers(nonce: str | None = None) -> list[tuple[bytes, bytes]]
             )
         )
 
-    if settings.security_hsts_enabled:
+    if settings.effective_security_hsts_enabled:
         hsts_parts = [
-            f"max-age={max(0, int(settings.security_hsts_max_age_seconds or 0))}"
+            f"max-age={max(0, int(settings.effective_security_hsts_max_age_seconds or 0))}"
         ]
-        if settings.security_hsts_include_subdomains:
+        if settings.effective_security_hsts_include_subdomains:
             hsts_parts.append("includeSubDomains")
-        if settings.security_hsts_preload:
+        if settings.effective_security_hsts_preload:
             hsts_parts.append("preload")
         raw_headers.append(
             (
@@ -259,7 +259,7 @@ def _extract_bearer_token(value: str | None) -> str:
 
 def _valid_api_token(request: Request) -> bool:
     settings = get_settings()
-    expected = settings.api_token.get_secret_value().strip() if settings.api_token else ""
+    expected = settings.effective_api_token
     if not expected:
         return False
 
@@ -271,7 +271,7 @@ def _valid_api_token(request: Request) -> bool:
 
 def _valid_metrics_token(request: Request) -> bool:
     settings = get_settings()
-    expected = settings.metrics_token.get_secret_value().strip() if settings.metrics_token else ""
+    expected = settings.effective_metrics_token
     if not expected:
         return False
 
@@ -283,7 +283,7 @@ def _valid_metrics_token(request: Request) -> bool:
 
 def verify_metrics_access(request: Request) -> None:
     settings = get_settings()
-    expected = settings.metrics_token.get_secret_value().strip() if settings.metrics_token else ""
+    expected = settings.effective_metrics_token
     if not expected:
         return
 
@@ -291,7 +291,7 @@ def verify_metrics_access(request: Request) -> None:
     if not provided:
         provided = request.headers.get("X-Absulli-Metrics-Token", "").strip()
 
-    if not secrets.compare_digest(provided, expected):
+    if not provided or not secrets.compare_digest(provided, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="metrics authentication required",
@@ -467,8 +467,12 @@ def _b64decode(value: str) -> bytes:
 
 
 def client_key(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
-    return forwarded or (request.client.host if request.client else "unknown")
+    settings = get_settings()
+    if settings.effective_trust_proxy:
+        forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+        if forwarded:
+            return forwarded
+    return request.client.host if request.client else "unknown"
 
 
 def record_login_event(
@@ -502,17 +506,17 @@ def record_login_event(
 
 def _login_window_seconds() -> int:
     settings = get_settings()
-    return max(60, int(settings.auth_login_window_seconds or 900))
+    return settings.effective_auth_login_window_seconds
 
 
 def _login_max_attempts() -> int:
     settings = get_settings()
-    return max(1, int(settings.auth_login_max_attempts or 8))
+    return settings.effective_auth_login_max_attempts
 
 
 def _login_lockout_seconds() -> int:
     settings = get_settings()
-    return max(60, int(settings.auth_login_lockout_seconds or 900))
+    return settings.effective_auth_login_lockout_seconds
 
 
 def is_login_limited(request: Request) -> bool:

@@ -1,5 +1,5 @@
-import json
 import logging
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -24,9 +24,15 @@ class HistoryMonitor:
     async def sync_users(self, db: Session) -> list[AbsUser]:
         payload = await self.client.get_users()
         users = normalize_user_payload(payload)
+        user_ids = [user["abs_user_id"] for user in users if user.get("abs_user_id")]
+        existing_users = {
+            user.abs_user_id: user
+            for user in db.query(AbsUser).filter(AbsUser.abs_user_id.in_(user_ids)).all()
+        } if user_ids else {}
+
         saved = []
         for user in users:
-            existing = db.query(AbsUser).filter_by(abs_user_id=user["abs_user_id"]).first()
+            existing = existing_users.get(user["abs_user_id"])
             if existing:
                 existing.username = user["username"]
                 existing.display_name = user["display_name"]
@@ -34,6 +40,7 @@ class HistoryMonitor:
             else:
                 existing = AbsUser(**user)
                 db.add(existing)
+                existing_users[user["abs_user_id"]] = existing
             saved.append(existing)
         db.commit()
         return saved
@@ -46,9 +53,15 @@ class HistoryMonitor:
             return []
 
         libraries = normalize_library_payload(payload)
+        library_ids = [library["abs_library_id"] for library in libraries if library.get("abs_library_id")]
+        existing_libraries = {
+            library.abs_library_id: library
+            for library in db.query(Library).filter(Library.abs_library_id.in_(library_ids)).all()
+        } if library_ids else {}
+
         saved = []
         for library in libraries:
-            existing = db.query(Library).filter_by(abs_library_id=library["abs_library_id"]).first()
+            existing = existing_libraries.get(library["abs_library_id"])
             if existing:
                 for key, value in library.items():
                     setattr(existing, key, value)
@@ -60,7 +73,7 @@ class HistoryMonitor:
         db.commit()
         return saved
 
-    def _payload_total(self, payload) -> int | None:
+    def _payload_total(self, payload: Any) -> int | None:
         if not isinstance(payload, dict):
             return None
         for key in ("total", "totalItems", "numItems", "count"):
@@ -72,7 +85,7 @@ class HistoryMonitor:
                 continue
         return None
 
-    def _can_prune_library_items(self, payload, normalized_count: int, request_limit: int) -> bool:
+    def _can_prune_library_items(self, payload: Any, normalized_count: int, request_limit: int) -> bool:
         total = self._payload_total(payload)
         if total is not None:
             return total <= normalized_count
@@ -91,8 +104,14 @@ class HistoryMonitor:
             items = normalize_media_item_payload(payload, library.abs_library_id, library.name)
             current_ids = {item["abs_item_id"] for item in items if item.get("abs_item_id")}
 
+            item_ids = [item["abs_item_id"] for item in items if item.get("abs_item_id")]
+            existing_items = {
+                item.abs_item_id: item
+                for item in db.query(MediaItem).filter(MediaItem.abs_item_id.in_(item_ids)).all()
+            } if item_ids else {}
+
             for item in items:
-                existing = db.query(MediaItem).filter_by(abs_item_id=item["abs_item_id"]).first()
+                existing = existing_items.get(item["abs_item_id"])
                 if existing:
                     for key, value in item.items():
                         setattr(existing, key, value)
@@ -114,10 +133,120 @@ class HistoryMonitor:
         db.commit()
         return imported
 
+    def _history_payload_rows(self, payload: Any) -> list[Any]:
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            rows = payload.get("sessions") or payload.get("listeningSessions") or payload.get("results") or []
+            return rows if isinstance(rows, list) else []
+        return []
 
-    def _enrich_history_row_from_media(self, db: Session, row: dict) -> None:
+    def _payload_page_value(self, payload: Any, *keys: str) -> int | None:
+        if not isinstance(payload, dict):
+            return None
+        for key in keys:
+            value = payload.get(key)
+            try:
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _payload_has_next_page(
+        self,
+        payload: Any,
+        page: int,
+        row_count: int,
+        items_per_page: int,
+        loaded_count: int,
+    ) -> bool:
+        if not isinstance(payload, dict):
+            return False
+
+        page_info = payload.get("pageInfo") if isinstance(payload.get("pageInfo"), dict) else {}
+        for key in ("hasNextPage", "hasMore", "nextPage"):
+            if key in payload:
+                value = payload.get(key)
+                if isinstance(value, bool):
+                    return value
+                if value in (None, "", False):
+                    return False
+                return True
+            if key in page_info:
+                value = page_info.get(key)
+                if isinstance(value, bool):
+                    return value
+                if value in (None, "", False):
+                    return False
+                return True
+
+        total_pages = self._payload_page_value(payload, "totalPages", "pages")
+        if total_pages is not None:
+            return page + 1 < total_pages
+
+        total = self._payload_total(payload)
+        if total is not None:
+            return loaded_count < total
+
+        return row_count >= items_per_page
+
+    async def _fetch_user_history_rows(self, user_id: str, items_per_page: int = 50, max_pages: int = 100) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen_session_ids: set[str] = set()
+
+        for page in range(max_pages):
+            payload = await self.client.get_user_listening_sessions(
+                user_id,
+                items_per_page=items_per_page,
+                page=page,
+            )
+            page_rows = normalize_history_payload(payload)
+            raw_row_count = len(self._history_payload_rows(payload))
+
+            if not page_rows:
+                break
+
+            new_rows = []
+            for row in page_rows:
+                session_id = row.get("abs_session_id") or ""
+                if session_id and session_id in seen_session_ids:
+                    continue
+                if session_id:
+                    seen_session_ids.add(session_id)
+                new_rows.append(row)
+
+            if not new_rows:
+                break
+
+            rows.extend(new_rows)
+
+            if not self._payload_has_next_page(payload, page, raw_row_count, items_per_page, len(rows)):
+                break
+        else:
+            log.warning("History sync reached max page limit for user %s", user_id)
+
+        return rows
+
+    def _media_lookup(self, db: Session) -> dict[str, MediaItem]:
+        return {item.abs_item_id: item for item in db.query(MediaItem).all() if item.abs_item_id}
+
+    def _library_lookup(self, db: Session) -> dict[str, Library]:
+        return {library.abs_library_id: library for library in db.query(Library).all() if library.abs_library_id}
+
+    def _enrich_history_row_from_media(
+        self,
+        db: Session,
+        row: dict[str, Any],
+        media_items: dict[str, MediaItem] | None = None,
+        libraries: dict[str, Library] | None = None,
+    ) -> None:
         item_id = row.get("abs_item_id") or ""
-        media_item = db.query(MediaItem).filter_by(abs_item_id=item_id).first() if item_id else None
+        if media_items is None:
+            media_item = db.query(MediaItem).filter_by(abs_item_id=item_id).first() if item_id else None
+        else:
+            media_item = media_items.get(item_id) if item_id else None
+
         if media_item:
             if not row.get("title") or row.get("title") == "Unknown":
                 row["title"] = media_item.title or row.get("title") or "Unknown"
@@ -132,34 +261,44 @@ class HistoryMonitor:
 
         library_id = row.get("library_id") or ""
         if library_id and not row.get("library_name"):
-            library = db.query(Library).filter_by(abs_library_id=library_id).first()
+            if libraries is None:
+                library = db.query(Library).filter_by(abs_library_id=library_id).first()
+            else:
+                library = libraries.get(library_id)
             if library:
                 row["library_name"] = library.name or ""
-
 
     async def poll(self, db: Session) -> int:
         users = await self.sync_users(db)
         libraries = await self.sync_libraries(db)
         await self.sync_recent_items(db, libraries)
         usernames = friendly_names(db)
+        media_items = self._media_lookup(db)
+        library_lookup = self._library_lookup(db)
 
         imported = 0
         for user in users:
             if not user.abs_user_id or user.abs_user_id == "unknown":
                 continue
             try:
-                payload = await self.client.get_user_listening_sessions(user.abs_user_id)
+                rows = await self._fetch_user_history_rows(user.abs_user_id)
             except Exception as exc:
                 log.warning("History sync failed for user %s: %s", user.username, exc)
                 continue
 
-            rows = normalize_history_payload(payload)
+            session_ids = [row["abs_session_id"] for row in rows if row.get("abs_session_id")]
+            existing_rows = {}
+            if session_ids:
+                existing_rows = {
+                    row.abs_session_id: row
+                    for row in db.query(ListeningHistory).filter(ListeningHistory.abs_session_id.in_(session_ids)).all()
+                }
+
             for row in rows:
                 if row["abs_user_id"] in usernames:
                     row["username"] = usernames[row["abs_user_id"]]
-                self._enrich_history_row_from_media(db, row)
-                existing = db.query(ListeningHistory).filter_by(abs_session_id=row["abs_session_id"]).first()
-                row["raw_json"] = json.dumps(row["raw_json"], default=str)
+                self._enrich_history_row_from_media(db, row, media_items, library_lookup)
+                existing = existing_rows.get(row["abs_session_id"])
                 if existing:
                     for key, value in row.items():
                         setattr(existing, key, value)

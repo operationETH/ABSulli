@@ -1,7 +1,8 @@
 import re
 
+import absulli.core.security as security
 import absulli.web.routes as web_routes
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 
 from absulli.core.config import get_settings
@@ -18,7 +19,8 @@ from absulli.core.security import (
 )
 from absulli.web.routes import router as web_router
 from absulli.web.api import router as api_router
-from absulli.database.models import LoginLog
+from absulli.database.models import LoginAttempt, LoginLog
+from absulli.database.session import SessionLocal
 
 
 def test_clean_image_format_allowlist():
@@ -78,6 +80,7 @@ def test_browser_routes_redirect_to_login_while_api_stays_401(monkeypatch):
     csp = browser_response.headers["content-security-policy"]
     assert "style-src 'self' 'nonce-" in csp
     assert "unsafe-inline" not in csp
+    assert "frame-ancestors 'none'" in csp
     assert "{nonce}" not in csp
 
     get_settings.cache_clear()
@@ -117,6 +120,60 @@ def test_api_and_metrics_tokens_still_work(monkeypatch):
 
     wrong_metrics_response = client.get("/metrics", headers={"Authorization": "Bearer api-token"})
     assert wrong_metrics_response.status_code == 401
+
+    empty_metrics_response = client.get(
+        "/metrics",
+        headers={"Authorization": "Bearer ", "X-Absulli-Metrics-Token": ""},
+    )
+    assert empty_metrics_response.status_code == 401
+
+    get_settings.cache_clear()
+
+
+
+
+def test_verify_metrics_access_rejects_empty_provided_token(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "false")
+    monkeypatch.setenv("ABSULLI_METRICS_TOKEN", "metrics-token")
+    get_settings.cache_clear()
+
+    app = FastAPI()
+
+    @app.get("/metrics")
+    def metrics(request: Request):
+        security.verify_metrics_access(request)
+        return Response("metric 1\n", media_type="text/plain")
+
+    client = TestClient(app)
+
+    response = client.get(
+        "/metrics",
+        headers={"Authorization": "Bearer ", "X-Absulli-Metrics-Token": ""},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "metrics authentication required"
+
+    get_settings.cache_clear()
+
+
+def test_client_key_ignores_x_forwarded_for_until_trust_proxy_enabled(monkeypatch):
+    app = FastAPI()
+
+    @app.get("/client-key")
+    def client_key_endpoint(request: Request):
+        return {"client_key": security.client_key(request)}
+
+    monkeypatch.setenv("ABSULLI_TRUST_PROXY", "false")
+    get_settings.cache_clear()
+    client = TestClient(app)
+    untrusted = client.get("/client-key", headers={"X-Forwarded-For": "203.0.113.9"})
+    assert untrusted.json()["client_key"] != "203.0.113.9"
+
+    monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
+    get_settings.cache_clear()
+    trusted = client.get("/client-key", headers={"X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
+    assert trusted.json()["client_key"] == "203.0.113.9"
 
     get_settings.cache_clear()
 
@@ -167,6 +224,7 @@ def test_login_csrf_required_and_valid_token_allows_login(monkeypatch):
     get_settings.cache_clear()
 
     monkeypatch.setattr(web_routes, "record_login_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(security, "current_session_version", lambda: "test-session-version")
 
     app = FastAPI()
     app.add_middleware(SecurityHeadersMiddleware)
@@ -188,7 +246,7 @@ def test_login_csrf_required_and_valid_token_allows_login(monkeypatch):
     assert "absulli_csrf" in missing_csrf.headers["set-cookie"]
     assert "httponly" not in missing_csrf.headers["set-cookie"].lower()
 
-    match = re.search(r'name="csrf_token" value="([^"]+)"', login_page.text)
+    match = re.search(r'name="csrf_token" value="([^"]+)"', missing_csrf.text)
     assert match is not None
     csrf_token = match.group(1)
 
@@ -429,5 +487,70 @@ def test_setup_mode_allows_favicon_and_healthz_without_redirect_or_csrf_rotation
     healthz_response = client.get("/healthz", follow_redirects=False)
     assert healthz_response.status_code == 200
     assert "location" not in healthz_response.headers
+
+    get_settings.cache_clear()
+
+
+def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
+    monkeypatch.setenv("ABSULLI_AUTH_PASSWORD", "test123")
+    monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
+    monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
+    monkeypatch.setenv("ABSULLI_AUTH_LOGIN_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("ABSULLI_AUTH_LOGIN_WINDOW_SECONDS", "900")
+    monkeypatch.setenv("ABSULLI_AUTH_LOGIN_LOCKOUT_SECONDS", "900")
+    get_settings.cache_clear()
+
+    forwarded_ip = "198.51.100.44"
+    other_forwarded_ip = "198.51.100.45"
+    with SessionLocal() as db:
+        db.query(LoginAttempt).filter(LoginAttempt.client_key.in_([forwarded_ip, other_forwarded_ip])).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+    monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
+    monkeypatch.setattr(web_routes, "record_login_event", lambda *args, **kwargs: None)
+
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.include_router(web_router)
+    client = TestClient(app)
+
+    for _ in range(2):
+        response = client.post(
+            "/login",
+            headers={"X-Forwarded-For": f"{forwarded_ip}, 10.0.0.10"},
+            data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 401
+
+    limited = client.post(
+        "/login",
+        headers={"X-Forwarded-For": f"{forwarded_ip}, 10.0.0.10"},
+        data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
+        follow_redirects=False,
+    )
+    assert limited.status_code == 429
+
+    other_ip = client.post(
+        "/login",
+        headers={"X-Forwarded-For": f"{other_forwarded_ip}, 10.0.0.10"},
+        data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
+        follow_redirects=False,
+    )
+    assert other_ip.status_code == 401
+
+    with SessionLocal() as db:
+        attempt = db.query(LoginAttempt).filter_by(client_key=forwarded_ip).one()
+        assert attempt.failed_count == 2
+        assert attempt.locked_until is not None
+        assert db.query(LoginAttempt).filter_by(client_key=other_forwarded_ip).one().failed_count == 1
+        db.query(LoginAttempt).filter(LoginAttempt.client_key.in_([forwarded_ip, other_forwarded_ip])).delete(
+            synchronize_session=False
+        )
+        db.commit()
 
     get_settings.cache_clear()

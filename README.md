@@ -14,6 +14,7 @@ ABSulli is an [Audiobookshelf](https://github.com/advplyr/audiobookshelf) monito
 - Library and user overview
 - Recently added media
 - Listening history
+- Notification support (Gotify, ntfy, Discord, Slack, Telegram, Pushover, Pushbullet, Email, Webhook)
 - Local SQLite storage - no external database
 - Built-in login with rate limiting and audit logging
 - Optional environment variable configuration for Docker Compose or automation
@@ -53,6 +54,8 @@ Then open **http://\<server-ip\>:8272** and follow the setup wizard.
 
 The wizard will ask for your Audiobookshelf URL and API key, create an admin login, and immediately start importing your data. No `.env` file required.
 
+After setup, all connection and notification settings can be managed from the **Settings** page.
+
 ---
 
 ## Getting your Audiobookshelf API key
@@ -91,6 +94,33 @@ No data is sent anywhere outside your network. ABSulli only communicates with yo
 
 ---
 
+
+## Upgrading
+
+Before upgrading, back up your config directory. The most important file is `/config/absulli.db`, which contains your ABSulli settings, activity, and listening history. If you use the example compose file, that is usually `./data/absulli.db` on the host.
+
+To upgrade a Docker install:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+ABSulli runs database migrations automatically during startup. Watch the logs after upgrading to confirm the app starts cleanly:
+
+```bash
+docker logs absulli -f
+```
+
+For local development builds, rebuild and restart instead:
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
+---
+
 ## Database migrations
 
 ABSulli uses Alembic for database schema migrations. Migrations run automatically on startup.
@@ -119,7 +149,7 @@ ABSulli ships with the following enabled by default:
 - CSRF protection on all form submissions
 - Separate API and metrics tokens with independent scopes
 
-Authentication is optional but recommended for any install not fully protected by a network boundary or reverse proxy auth.
+Authentication is enabled by default and recommended for all installs.
 
 ---
 

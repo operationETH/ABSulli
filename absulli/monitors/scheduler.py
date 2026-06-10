@@ -93,7 +93,7 @@ class AbsulliScheduler:
         self.scheduler.add_job(
             self.poll_activity,
             "interval",
-            seconds=max(5, self.settings.abs_poll_interval),
+            seconds=max(5, self.settings.effective_abs_poll_interval),
             id="activity_poll",
             replace_existing=True,
             max_instances=1,
@@ -101,7 +101,7 @@ class AbsulliScheduler:
         self.scheduler.add_job(
             self.poll_history,
             "interval",
-            seconds=max(60, self.settings.abs_history_poll_interval),
+            seconds=max(60, self.settings.effective_abs_history_poll_interval),
             id="history_poll",
             replace_existing=True,
             max_instances=1,

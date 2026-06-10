@@ -1,0 +1,9 @@
+<form class="history-page-size" method="get">
+  <label for="history-page-size">Show</label>
+  <select id="history-page-size" name="limit" onchange="this.form.submit()">
+    {% for option in history_page_size_options %}
+      <option value="{{ option }}" {% if option == history_page_size %}selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+  </select>
+  <span>entries per page</span>
+</form>

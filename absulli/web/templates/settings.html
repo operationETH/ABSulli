@@ -3,23 +3,324 @@
 <section class="hero">
   <div>
     <h1>Settings</h1>
-    <p>Environment-backed configuration. Edit <code>.env</code> and restart to change.</p>
+    <p>Environment variables take priority over saved settings. Configure here or use a .env file.</p>
   </div>
 </section>
 
+<nav class="settings-tabs" aria-label="Settings sections">
+  {% for tab in settings_tabs %}
+  <a class="settings-tab {{ 'active' if settings_active_tab == tab.id else '' }}" href="/settings?tab={{ tab.id }}">{{ tab.label }}</a>
+  {% endfor %}
+</nav>
+
+{% if settings_saved %}
+<section class="notice good">Settings saved.</section>
+{% endif %}
+{% if settings_error %}
+<section class="notice warn">{{ settings_error }}</section>
+{% endif %}
+
+{% if settings_active_tab == 'general' %}
 <section class="panel">
-  <div class="panel-head"><h2>Application</h2></div>
-  <div class="settings-grid">
-    <div class="settings-item"><code>ABSULLI_VERSION</code><span>v{{ app_version }}</span></div>
+  <div class="panel-head">
+    <div>
+      <h2>Audiobookshelf Connection</h2>
+      <p>Configure the Audiobookshelf connection and polling intervals.</p>
+    </div>
   </div>
+  <form id="general-settings-form" class="settings-form" method="post" action="/settings/general">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-grid general-settings-grid">
+      {% for field in general_fields %}
+        {% if field.type == 'checkbox' %}
+        <label class="settings-checkbox-field">
+          <span>{{ field.label }}</span>
+          <input type="checkbox" name="{{ field.name }}" {% if field.value == 'true' %}checked{% endif %} {% if field.from_env %}disabled{% endif %}>
+          {% if field.from_env %}<small>Managed by .env.</small>{% endif %}
+        </label>
+        {% else %}
+        <label>
+          <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
+          <input
+            name="{{ field.name }}"
+            type="{{ field.type }}"
+            value="{{ field.value if field.type != 'password' else '' }}"
+            placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+            autocomplete="off"
+            {% if field.from_env %}readonly{% endif %}
+          >
+          {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+        </label>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div id="general-test-result" class="setup-test-result" hidden></div>
+    <div class="form-actions">
+      <button type="button" class="secondary" id="general-test-connection">Test Connection</button>
+      <button type="submit">Save Changes</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if settings_active_tab == 'network' %}
+<section class="panel network-settings-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Network Settings</h2>
+      <p>Configure the common reverse proxy and metrics options for your ABSulli instance.</p>
+    </div>
+  </div>
+  <form class="settings-form compact-settings-form" method="post" action="/settings/network">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="settings-list">
+      {% for field in network_fields %}
+      <div class="settings-row">
+        <div class="settings-row-copy">
+          <strong>{{ field.label }}</strong>
+          <small>{{ field.description }}</small>
+          <div class="settings-row-badges">
+            {% if field.restart_required %}<em>Restart Required</em>{% endif %}
+            {% if field.from_env %}<em>Managed by .env</em>{% endif %}
+          </div>
+          {% if field.advanced_note %}<small>{{ field.advanced_note }}</small>{% endif %}
+        </div>
+        <div class="settings-row-control">
+          {% if field.type == 'checkbox' %}
+          <input type="checkbox" name="{{ field.name }}" {% if field.value == 'true' %}checked{% endif %} {% if field.from_env %}disabled{% endif %}>
+          {% else %}
+          <input
+            name="{{ field.name }}"
+            type="{{ field.type }}"
+            value="{{ field.value if field.type != 'password' else '' }}"
+            placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+            autocomplete="off"
+            {% if field.from_env %}readonly{% endif %}
+          >
+          {% if field.type == 'password' and field.token_configured and not field.from_env %}<small>Leave blank to keep the saved value.</small>{% endif %}
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="form-actions">
+      <button type="submit">Save Changes</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if settings_active_tab == 'users' %}
+<section class="panel users-settings-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Users</h2>
+      <p>Configure the local admin account and API access.</p>
+    </div>
+  </div>
+  <form class="settings-form users-settings-form" method="post" action="/settings/users">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="settings-subsection">
+      <div class="settings-subsection-head">
+        <h3>Admin Account</h3>
+        <p>Update the ABSulli admin login.</p>
+      </div>
+      <div class="form-grid user-account-grid">
+        {% for field in user_fields %}
+          {% if field.group == 'account' %}
+          <label>
+            <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
+            <input
+              name="{{ field.name }}"
+              type="{{ field.type }}"
+              value="{{ field.value if field.type != 'password' else '' }}"
+              placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+              autocomplete="off"
+              {% if field.from_env %}readonly{% endif %}
+            >
+            {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="settings-subsection">
+      <div class="settings-subsection-head">
+        <h3>ABSulli API Access</h3>
+        <p>Optional token for scripts or external tools that call ABSulli endpoints.</p>
+      </div>
+      <div class="form-grid user-api-grid">
+        {% for field in user_fields %}
+          {% if field.group == 'api' %}
+          <label>
+            <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
+            <input
+              name="{{ field.name }}"
+              type="{{ field.type }}"
+              value="{{ field.value if field.type != 'password' else '' }}"
+              placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+              autocomplete="off"
+              {% if field.from_env %}readonly{% endif %}
+            >
+            {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="settings-subsection">
+      <div class="settings-subsection-head">
+        <h3>Sessions</h3>
+        <p>Changing the username or password revokes sessions automatically.</p>
+      </div>
+      <label class="settings-check field-check">
+        <input type="checkbox" name="revoke_sessions">
+        <span>Revoke existing browser sessions after saving</span>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit">Save Changes</button>
+    </div>
+  </form>
 </section>
 
-<section class="panel">
-  <div class="panel-head"><h2>Configuration</h2></div>
-  <div class="settings-grid">
-    {% for key, value in settings.items() %}
-    <div class="settings-item"><code>{{ key }}</code><span>{{ value }}</span></div>
+<section class="panel auth-summary-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Auth Summary</h2>
+      <p>Login policy details can be changed in a .env file.</p>
+    </div>
+  </div>
+  <div class="settings-grid readable-settings-grid">
+    {% for item in user_settings %}
+    <div class="settings-item"><strong>{{ item.label }}</strong><span>{{ item.value }}</span></div>
     {% endfor %}
   </div>
 </section>
+{% endif %}
+
+{% if settings_active_tab == 'notifications' %}
+<section class="panel notification-settings-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Notification Settings</h2>
+      <p>Configure notification agents and playback event delivery.</p>
+    </div>
+    <span class="badge good">{{ settings.NOTIFICATION_AGENTS_ENABLED }} enabled</span>
+  </div>
+
+  <div class="agent-tabs" role="tablist" aria-label="Notification agents">
+    {% for agent in notification_agents %}
+    <button
+      class="agent-tab {{ 'active' if request.query_params.get('agent', 'gotify') == agent.id else '' }}"
+      type="button"
+      data-agent-tab="{{ agent.id }}"
+      aria-selected="{{ 'true' if request.query_params.get('agent', 'gotify') == agent.id else 'false' }}"
+    >
+      <span>{{ agent.icon }}</span>
+      {{ agent.label }}
+      {% if agent.enabled %}<em>Enabled</em>{% elif agent.configured %}<em>Configured</em>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+
+  {% for agent in notification_agents %}
+  <div class="agent-panel {{ 'active' if request.query_params.get('agent', 'gotify') == agent.id else '' }}" data-agent-panel="{{ agent.id }}">
+    <form id="{{ agent.id }}-settings-form" class="settings-form agent-settings-form" method="post" action="/settings/notifications/{{ agent.id }}" data-agent-form="{{ agent.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+      <div class="agent-form-row agent-toggle-row">
+        <label class="settings-check">
+          <input type="checkbox" name="enabled" {% if agent.enabled %}checked{% endif %}>
+          <span>Enable {{ agent.label }}</span>
+        </label>
+      </div>
+
+      {% if agent.env_managed %}
+      <p class="form-help">.env-managed fields are read-only. Clear the matching env values to edit those fields here.</p>
+      {% endif %}
+
+      <div class="form-grid">
+        {% for field in agent.fields %}
+          {% if field.type == 'checkbox' %}
+          <label class="settings-check field-check">
+            <input type="checkbox" name="{{ field.name }}" {% if field.value == 'true' %}checked{% endif %} {% if field.from_env %}disabled{% endif %}>
+            <span>{{ field.label }}</span>
+          </label>
+          {% else %}
+          <label>
+            <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
+            <input
+              name="{{ field.name }}"
+              type="{{ field.type }}"
+              value="{{ field.value if field.type != 'password' else '' }}"
+              placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+              autocomplete="off"
+              {% if field.from_env %}readonly{% endif %}
+            >
+            {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <div class="notification-events">
+        <h3>Notification Events</h3>
+        <div class="event-list">
+          {% for event in notification_events %}
+          <label class="event-option">
+            <input type="checkbox" name="{{ event.setting }}" {% if event.enabled %}checked{% endif %}>
+            <span>
+              <strong>{{ event.label }}</strong>
+              <small>{{ event.description }}</small>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div id="{{ agent.id }}-test-result" class="setup-test-result" hidden></div>
+      <div class="form-actions">
+        <button type="button" class="secondary" data-agent-test="{{ agent.id }}">Test</button>
+        <button type="submit">Save Changes</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if settings_active_tab == 'about' %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>About</h2>
+      <p>Application version, storage, and local database details.</p>
+    </div>
+  </div>
+  <div class="settings-grid readable-settings-grid">
+    {% for item in about_settings %}
+    <div class="settings-item"><strong>{{ item.label }}</strong><span>{{ item.value }}</span></div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Data Summary</h2>
+      <p>Current local database row counts.</p>
+    </div>
+  </div>
+  <div class="settings-grid readable-settings-grid">
+    {% for item in about_data %}
+    <div class="settings-item"><strong>{{ item.label }}</strong><span>{{ item.value }}</span></div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}

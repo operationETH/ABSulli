@@ -176,7 +176,10 @@
 <section class="panel media-history-panel" id="history">
   <div class="panel-head">
     <h2>Listen History for {{ display_name }}</h2>
-    <a href="/history">View all history</a>
+    <div class="panel-actions">
+      {% include "partials/history_page_size.html" %}
+      <a href="/history">View all history</a>
+    </div>
   </div>
 
   <div class="table-wrap">

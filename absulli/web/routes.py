@@ -23,6 +23,7 @@ from absulli.core.security import (
     clamp_image_dimension,
     clean_image_format,
     auth_username,
+    auth_password_hash,
     create_csrf_token,
     is_login_limited,
     login_retry_after_seconds,
@@ -31,11 +32,12 @@ from absulli.core.security import (
     set_csrf_cookie,
     set_session_cookie,
     password_hash,
+    rotate_session_version,
     setup_required,
     validate_csrf_token,
     verify_login,
 )
-from absulli.core.setup_state import set_setup_settings
+from absulli.core.setup_state import get_setup_setting, set_setup_setting, set_setup_settings
 from absulli.web.queries import (
     active_sessions_query,
     enrich_active_rows,
@@ -74,15 +76,47 @@ from absulli.web.queries import (
     first_author_id_from_books,
     author_payload_value,
     clean_author_description,
-    clean_graph_user,
-    build_graphs,
 )
+from absulli.web.graphs import build_graphs, clean_graph_user
 from absulli.web.templating import templates
 
 router = APIRouter()
 log = logging.getLogger(__name__)
 
 COVER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+from absulli.web.settings import (
+    AGENT_FIELD_CONFIGS,
+    NOTIFICATION_EVENT_SETTINGS,
+    agent_from_values,
+    agent_required_fields_present,
+    agent_settings_context,
+    agent_values_from_form,
+    clean_settings_tab,
+    general_settings_context,
+    general_values_from_form,
+    gotify_settings_context,
+    history_page_size,
+    history_page_size_context,
+    network_settings_context,
+    network_values_from_form,
+    notification_events_context,
+    settings_field_from_env,
+    settings_tab_context,
+    user_settings_context_fields,
+    user_values_from_form,
+    bool_label,
+    compact_bytes,
+    about_settings_context,
+    about_data_context,
+    field_from_env,
+)
+
+def history_user_url(row: ListeningHistory) -> str:
+    user_key = (row.abs_user_id or row.username or "").strip()
+    if not user_key:
+        return ""
+    return f"/users/{quote(user_key, safe='')}"
 
 
 def validate_cover_id(value: str, label: str) -> str:
@@ -186,15 +220,8 @@ async def setup_test_connection(request: Request):
         )
 
     try:
-        async with httpx.AsyncClient(
-            timeout=min(max(int(settings.abs_request_timeout or 15), 3), 30),
-            verify=settings.abs_verify_ssl,
-            headers={"Authorization": f"Bearer {abs_api_key}"},
-        ) as client:
-            response = await client.get(f"{abs_url}/api/me")
-            if response.status_code == 404:
-                response = await client.get(f"{abs_url}/api/libraries")
-            response.raise_for_status()
+        async with AudiobookshelfClient(settings) as client:
+            await client.test_connection(abs_url, abs_api_key)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in {401, 403}:
             message = "Audiobookshelf rejected the API key."
@@ -508,6 +535,9 @@ async def author_cover(
     db: Session = Depends(get_db),
 ):
     author_id = validate_cover_id(author_id, "author")
+    if not author_exists(db, author_id):
+        raise HTTPException(status_code=404, detail="Author image not found")
+
     width = clamp_image_dimension(width, default=420) or 420
     height = clamp_image_dimension(height)
     fmt = clean_image_format(fmt)
@@ -586,8 +616,16 @@ def activity(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/history", response_class=HTMLResponse)
 def history(request: Request, db: Session = Depends(get_db)):
-    rows = db.query(ListeningHistory).order_by(desc(media_history_date())).limit(250).all()
-    return templates.TemplateResponse(request, "history.html", {"rows": rows, "page": "history", "fmt_seconds": fmt_seconds})
+    limit = history_page_size(request)
+    rows = db.query(ListeningHistory).order_by(desc(media_history_date())).limit(limit).all()
+    context = {
+        "rows": rows,
+        "page": "history",
+        "fmt_seconds": fmt_seconds,
+        "history_user_url": history_user_url,
+    }
+    context.update(history_page_size_context(limit))
+    return templates.TemplateResponse(request, "history.html", context)
 
 
 
@@ -629,8 +667,9 @@ def library_detail(library_id: str, request: Request, db: Session = Depends(get_
     if not library:
         raise HTTPException(status_code=404, detail="Library not found")
 
+    limit = history_page_size(request)
     items = library_items(db, library.abs_library_id, limit=60)
-    rows = library_history_rows(db, library, limit=250)
+    rows = library_history_rows(db, library, limit=limit)
     item_count = max(int(library.item_count or 0), db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).count())
 
     return templates.TemplateResponse(
@@ -643,6 +682,8 @@ def library_detail(library_id: str, request: Request, db: Session = Depends(get_
             "item_count": item_count,
             "items": items,
             "rows": rows,
+            "history_user_url": history_user_url,
+            **history_page_size_context(limit),
             "recently_played": library_recently_played_items(db, library),
             "top_items": library_top_items(db, library),
             "window_stats": library_window_stats(db, library),
@@ -658,8 +699,9 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
     if not author_name:
         raise HTTPException(status_code=404, detail="Author not found")
 
+    limit = history_page_size(request)
     books = author_items(db, author_name)
-    rows = author_history_rows(db, author_name, limit=250)
+    rows = author_history_rows(db, author_name, limit=limit)
     if not books and not rows:
         raise HTTPException(status_code=404, detail="Author not found")
 
@@ -676,7 +718,8 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
                 author_id = author_payload_value(author_payload, "id", "authorId", "_id", "asin") or author_id
             if author_id and (not author_payload or not author_payload_value(author_payload, "description", "desc", "bio", "biography", "summary")):
                 author_payload = await client.get_author(author_id) or author_payload
-    except Exception:  
+    except Exception as exc:
+        log.warning("Failed to enrich author %r from Audiobookshelf: %s", author_name, exc)
         author_payload = None
 
     description = clean_author_description(
@@ -694,6 +737,8 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
             "author_description": description,
             "books": books,
             "rows": rows,
+            "history_user_url": history_user_url,
+            **history_page_size_context(limit),
             "cover_item_id": author_cover_item_id(db, author_name),
             "window_stats": author_window_stats(db, author_name),
             "user_stats": author_user_stats(db, author_name),
@@ -713,11 +758,12 @@ def media_detail(item_id: str, request: Request, db: Session = Depends(get_db)):
     if not media_item and not latest_history:
         raise HTTPException(status_code=404, detail="Media item not found")
 
+    limit = history_page_size(request)
     rows = (
         db.query(ListeningHistory)
         .filter(ListeningHistory.abs_item_id == item_id)
         .order_by(desc(media_history_date()))
-        .limit(250)
+        .limit(limit)
         .all()
     )
     title = resolve_media_title(media_item, latest_history, item_id)
@@ -740,6 +786,8 @@ def media_detail(item_id: str, request: Request, db: Session = Depends(get_db)):
             "duration": duration,
             "media_item": media_item,
             "rows": rows,
+            "history_user_url": history_user_url,
+            **history_page_size_context(limit),
             "window_stats": media_window_stats(db, item_id),
             "user_stats": media_user_stats(db, item_id),
             "fmt_seconds": fmt_seconds,
@@ -757,7 +805,8 @@ def users(request: Request, db: Session = Depends(get_db)):
 def user_detail(user_key: str, request: Request, db: Session = Depends(get_db)):
     user_key = user_key.strip()
     user = resolve_user(db, user_key)
-    rows = user_history_rows(db, user, user_key, limit=250)
+    limit = history_page_size(request)
+    rows = user_history_rows(db, user, user_key, limit=limit)
     if not user and not rows:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -772,6 +821,7 @@ def user_detail(user_key: str, request: Request, db: Session = Depends(get_db)):
             "display_name": display_name,
             "initial": user_initial(display_name),
             "rows": rows,
+            **history_page_size_context(limit),
             "window_stats": user_window_stats(db, user, user_key),
             "player_stats": user_player_stats(db, user, user_key),
             "library_stats": user_library_stats(db, user, user_key),
@@ -887,16 +937,251 @@ def graphs(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request):
+def settings_page(request: Request, db: Session = Depends(get_db)):
     settings = get_settings()
+    agent_context = agent_settings_context(settings)
     safe = {
         "ABS_URL": settings.effective_abs_url,
-        "ABS_POLL_INTERVAL": settings.abs_poll_interval,
-        "ABS_HISTORY_POLL_INTERVAL": settings.abs_history_poll_interval,
-        "GOTIFY_ENABLED": bool(settings.gotify_url and settings.gotify_token),
-        "WEBHOOK_ENABLED": bool(settings.webhook_url),
+        "ABS_POLL_INTERVAL": settings.effective_abs_poll_interval,
+        "ABS_HISTORY_POLL_INTERVAL": settings.effective_abs_history_poll_interval,
+        "NOTIFICATION_AGENTS_ENABLED": sum(1 for agent in agent_context if agent["enabled"]),
     }
-    return templates.TemplateResponse(request, "settings.html", {"settings": safe, "page": "settings", "app_version": __version__})
+    active_tab = clean_settings_tab(request.query_params.get("tab") or ("notifications" if request.query_params.get("agent") else "general"))
+    csrf_token = create_csrf_token()
+    response = templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "settings": safe,
+            "settings_tabs": settings_tab_context(active_tab),
+            "settings_active_tab": active_tab,
+            "network_settings": {
+                "ABSULLI_HOST": settings.host,
+                "ABSULLI_PORT": settings.port,
+                "ABSULLI_TRUST_PROXY": bool_label(settings.effective_trust_proxy),
+                "ABSULLI_COOKIE_SECURE": bool_label(settings.session_cookie_secure),
+                "ABSULLI_SECURITY_CSP_ENABLED": bool_label(settings.effective_security_csp_enabled),
+                "ABSULLI_SECURITY_HSTS_ENABLED": bool_label(settings.effective_security_hsts_enabled),
+                "ABSULLI_METRICS_TOKEN": "Configured" if settings.effective_metrics_token else "Not configured",
+                "ABS_VERIFY_SSL": bool_label(settings.effective_abs_verify_ssl),
+                "ABS_REQUEST_TIMEOUT": settings.effective_abs_request_timeout,
+            },
+            "user_settings": [
+                {"label": "Authentication", "value": "Enabled" if settings.auth_enabled else "Disabled"},
+                {"label": "Admin Username", "value": auth_username()},
+                {"label": "Session Length", "value": f"{settings.effective_auth_session_minutes} minutes"},
+                {
+                    "label": "Login Protection",
+                    "value": (
+                        f"{settings.effective_auth_login_max_attempts} attempts, "
+                        f"{settings.effective_auth_login_window_seconds} second window, "
+                        f"{settings.effective_auth_login_lockout_seconds} second lockout"
+                    ),
+                },
+                {"label": "ABSulli API Token", "value": "Configured" if settings.effective_api_token else "Not configured"},
+            ],
+            "user_fields": user_settings_context_fields(settings),
+            "about_settings": about_settings_context(settings, db),
+            "about_data": about_data_context(db),
+            "general_fields": general_settings_context(settings),
+            "network_fields": network_settings_context(settings),
+            "gotify": gotify_settings_context(settings),
+            "notification_agents": agent_context,
+            "notification_events": notification_events_context(),
+            "settings_saved": bool(request.query_params.get("saved")),
+            "settings_error": request.query_params.get("error") or "",
+            "page": "settings",
+            "app_version": __version__,
+            "csrf_token": csrf_token,
+        },
+    )
+    set_csrf_cookie(response, csrf_token)
+    return response
+
+
+@router.post("/settings/users", response_class=HTMLResponse)
+async def settings_users_save(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        values, password_changed = user_values_from_form(settings, form)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=users&error={quote(str(exc))}", status_code=303)
+
+    previous_username = auth_username()
+    set_setup_settings(values)
+    username_changed = values.get("auth_username", previous_username) != previous_username
+    revoke_sessions = bool(password_changed or username_changed or form.get("revoke_sessions") == "on")
+
+    response = RedirectResponse("/settings?tab=users&saved=users", status_code=303)
+    if revoke_sessions:
+        rotate_session_version()
+        set_session_cookie(response, values.get("auth_username") or auth_username())
+    return response
+
+
+@router.post("/settings/network", response_class=HTMLResponse)
+async def settings_network_save(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        values = network_values_from_form(settings, form)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=network&error={quote(str(exc))}", status_code=303)
+
+    saved_values = {
+        key: value
+        for key, value in values.items()
+        if not settings_field_from_env(settings, key)
+    }
+    set_setup_settings(saved_values)
+    return RedirectResponse("/settings?tab=network&saved=network", status_code=303)
+
+
+@router.post("/settings/general", response_class=HTMLResponse)
+async def settings_general_save(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        values = general_values_from_form(settings, form)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=general&error={quote(str(exc))}", status_code=303)
+
+    saved_values = {
+        key: value
+        for key, value in values.items()
+        if not settings_field_from_env(settings, key)
+    }
+    set_setup_settings(saved_values)
+    return RedirectResponse("/settings?tab=general&saved=general", status_code=303)
+
+
+@router.post("/settings/general/test")
+async def settings_general_test(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        return JSONResponse({"ok": False, "message": "Your settings form expired. Refresh and try again."}, status_code=403)
+
+    settings = get_settings()
+    try:
+        values = general_values_from_form(settings, form)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+
+    try:
+        async with AudiobookshelfClient(settings) as client:
+            await client.test_connection(values["abs_url"], values["abs_api_key"])
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403}:
+            message = "Audiobookshelf rejected the API key."
+        elif exc.response.status_code == 404:
+            message = "Audiobookshelf responded, but the API endpoint was not found. Check the URL."
+        else:
+            message = f"Audiobookshelf returned HTTP {exc.response.status_code}."
+        return JSONResponse({"ok": False, "message": message}, status_code=400)
+    except httpx.ConnectError:
+        return JSONResponse({"ok": False, "message": "Could not connect to Audiobookshelf. Check the URL and network."}, status_code=400)
+    except httpx.TimeoutException:
+        return JSONResponse({"ok": False, "message": "Audiobookshelf connection timed out."}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+    except Exception as exc:
+        log.warning("Audiobookshelf settings test failed: %s", exc)
+        return JSONResponse({"ok": False, "message": "Connection test failed. Check the URL and API key."}, status_code=400)
+
+    return {"ok": True, "message": "Audiobookshelf connection successful."}
+
+
+@router.post("/settings/notifications/{agent_id}", response_class=HTMLResponse)
+async def settings_notification_agent_save(request: Request, agent_id: str):
+    if agent_id not in AGENT_FIELD_CONFIGS:
+        raise HTTPException(status_code=404, detail="Unknown notification agent")
+
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    values: dict[str, str] = {}
+    is_enabled = form.get("enabled") == "on"
+
+    for meta in NOTIFICATION_EVENT_SETTINGS.values():
+        setting_name = str(meta["setting"])
+        values[setting_name] = "true" if form.get(setting_name) == "on" else "false"
+
+    values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"
+
+    if not is_enabled:
+        for field in AGENT_FIELD_CONFIGS[agent_id]["fields"]:
+            field_name = str(field["name"])
+            if not field_from_env(settings, field_name):
+                values[field_name] = ""
+        set_setup_settings(values)
+        return RedirectResponse(f"/settings?tab=notifications&saved={quote(agent_id)}&agent={quote(agent_id)}", status_code=303)
+
+    try:
+        agent_values = agent_values_from_form(settings, agent_id, form)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=notifications&agent={quote(agent_id)}&error={quote(str(exc))}", status_code=303)
+
+    if not agent_required_fields_present(agent_id, agent_values):
+        return RedirectResponse(f"/settings?tab=notifications&agent={quote(agent_id)}&error={quote(AGENT_FIELD_CONFIGS[agent_id]['label'] + ' required fields are missing')}", status_code=303)
+
+    for field in AGENT_FIELD_CONFIGS[agent_id]["fields"]:
+        field_name = str(field["name"])
+        if not field_from_env(settings, field_name):
+            values[field_name] = agent_values.get(field_name, "")
+
+    set_setup_settings(values)
+    return RedirectResponse(f"/settings?tab=notifications&saved={quote(agent_id)}&agent={quote(agent_id)}", status_code=303)
+
+
+@router.post("/settings/notifications/{agent_id}/test")
+async def settings_notification_agent_test(request: Request, agent_id: str):
+    if agent_id not in AGENT_FIELD_CONFIGS:
+        return JSONResponse({"ok": False, "message": "Unknown notification agent."}, status_code=404)
+
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        return JSONResponse({"ok": False, "message": "Your settings form expired. Refresh and try again."}, status_code=403)
+
+    if form.get("enabled") != "on":
+        return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} is disabled."}, status_code=400)
+
+    try:
+        values = agent_values_from_form(get_settings(), agent_id, form)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+
+    if not agent_required_fields_present(agent_id, values):
+        return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} required fields are missing."}, status_code=400)
+
+    try:
+        await agent_from_values(agent_id, values).send(
+            "ABSulli test notification",
+            f"{AGENT_FIELD_CONFIGS[agent_id]['label']} notifications are configured correctly.",
+            {"event_type": "test"},
+        )
+    except Exception as exc:
+        log.warning("%s test notification failed: %s", AGENT_FIELD_CONFIGS[agent_id]["label"], exc)
+        return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test failed. Check the settings and network."}, status_code=502)
+
+    return {"ok": True, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test notification sent."}
 
 
 @router.get("/notifications", response_class=HTMLResponse)

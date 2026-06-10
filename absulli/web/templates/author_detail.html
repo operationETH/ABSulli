@@ -117,7 +117,10 @@
 <section class="panel media-history-panel">
   <div class="panel-head">
     <h2>Listen History for {{ author }}</h2>
-    <a href="/history">View all history</a>
+    <div class="panel-actions">
+      {% include "partials/history_page_size.html" %}
+      <a href="/history">View all history</a>
+    </div>
   </div>
 
   <div class="table-wrap">
@@ -140,7 +143,14 @@
         {% for row in rows %}
           <tr>
             <td>{{ row.started_at.strftime('%Y-%m-%d') if row.started_at else row.imported_at.strftime('%Y-%m-%d') if row.imported_at else '' }}</td>
-            <td>{{ row.username or 'Unknown' }}</td>
+            <td>
+              {% set user_url = history_user_url(row) %}
+              {% if user_url %}
+                <a class="table-link" href="{{ user_url }}">{{ row.username or 'Unknown' }}</a>
+              {% else %}
+                {{ row.username or 'Unknown' }}
+              {% endif %}
+            </td>
             <td>
               {% if row.abs_item_id %}
                 <a class="table-link" href="/media/{{ row.abs_item_id }}">{{ row.title or 'Unknown title' }}</a>
