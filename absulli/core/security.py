@@ -32,6 +32,7 @@ PUBLIC_PATHS = {
 PBKDF2_PREFIX = "pbkdf2_sha256"
 DEFAULT_PBKDF2_ITERATIONS = 600_000
 SESSION_VERSION_SETTING = "auth_session_version"
+_session_version_cache: str = ""
 
 SECURITY_HEADER_KEYS = {
     b"x-content-type-options",
@@ -141,14 +142,17 @@ class SecurityHeadersMiddleware:
             return None
 
         path = request.url.path
+        is_public_path = path in PUBLIC_PATHS or any(
+            path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES
+        )
+
+        # Never hit SQLite from middleware for public/static paths. The route itself
+        # can decide whether to redirect, show setup, or return health status.
+        if is_public_path or path == "/setup":
+            return None
 
         if setup_required():
-            if (
-                path == "/setup"
-                or path == "/setup/test-connection"
-                or path in PUBLIC_PATHS
-                or any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES)
-            ):
+            if path == "/setup/test-connection":
                 return None
             if not path.startswith("/api/") and path != "/metrics":
                 return RedirectResponse(url="/setup", status_code=status.HTTP_303_SEE_OTHER)
@@ -157,9 +161,6 @@ class SecurityHeadersMiddleware:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 media_type="text/plain",
             )
-
-        if path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES):
-            return None
 
         if path == "/metrics" and _valid_metrics_token(request):
             request.state.absulli_authenticated = True
@@ -380,12 +381,18 @@ def session_serializer() -> URLSafeTimedSerializer:
 
 
 def current_session_version() -> str:
+    global _session_version_cache
+
+    if _session_version_cache:
+        return _session_version_cache
+
     now = utcnow()
 
     with SessionLocal() as db:
         setting = db.query(Setting).filter(Setting.key == SESSION_VERSION_SETTING).first()
         if setting and setting.value:
-            return setting.value
+            _session_version_cache = setting.value
+            return _session_version_cache
 
         version = secrets.token_urlsafe(24)
         if setting:
@@ -394,10 +401,13 @@ def current_session_version() -> str:
         else:
             db.add(Setting(key=SESSION_VERSION_SETTING, value=version, updated_at=now))
         db.commit()
-        return version
+        _session_version_cache = version
+        return _session_version_cache
 
 
 def rotate_session_version() -> str:
+    global _session_version_cache
+
     version = secrets.token_urlsafe(24)
     now = utcnow()
 
@@ -410,6 +420,7 @@ def rotate_session_version() -> str:
             db.add(Setting(key=SESSION_VERSION_SETTING, value=version, updated_at=now))
         db.commit()
 
+    _session_version_cache = version
     return version
 
 

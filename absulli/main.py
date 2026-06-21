@@ -9,7 +9,7 @@ from absulli.core.config import get_settings
 from absulli.core.logging import configure_logging
 from absulli.database.session import init_db
 from absulli.core.security import SecurityHeadersMiddleware
-from absulli.core.setup_state import is_setup_complete
+from absulli.core.setup_state import is_setup_complete, warm_setup_state_cache
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.web.api import metrics_router, router as api_router
 from absulli.web.routes import router as web_router
@@ -22,6 +22,7 @@ scheduler = AbsulliScheduler(settings)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    warm_setup_state_cache()
     scheduler.start()
     yield
     await scheduler.shutdown()

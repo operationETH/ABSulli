@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,39 @@ log = logging.getLogger(__name__)
 class HistoryMonitor:
     def __init__(self, client: AudiobookshelfClient):
         self.client = client
+
+    def _chunks(self, values: Iterable[str], size: int = 900) -> Iterable[list[str]]:
+        chunk: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            chunk.append(value)
+            if len(chunk) >= size:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
+
+    def _media_items_by_abs_id(self, db: Session, item_ids: Iterable[str]) -> dict[str, MediaItem]:
+        media_items: dict[str, MediaItem] = {}
+        for chunk in self._chunks(item_ids):
+            for item in db.query(MediaItem).filter(MediaItem.abs_item_id.in_(chunk)).all():
+                media_items[item.abs_item_id] = item
+        return media_items
+
+    def _history_by_session_id(
+        self, db: Session, session_ids: Iterable[str]
+    ) -> dict[str, ListeningHistory]:
+        history_rows: dict[str, ListeningHistory] = {}
+        for chunk in self._chunks(session_ids):
+            for row in db.query(ListeningHistory).filter(ListeningHistory.abs_session_id.in_(chunk)).all():
+                history_rows[row.abs_session_id] = row
+        return history_rows
+
+    def _libraries_by_abs_id(self, db: Session) -> dict[str, Library]:
+        return {library.abs_library_id: library for library in db.query(Library).all()}
 
     async def sync_users(self, db: Session) -> list[AbsUser]:
         payload = await self.client.get_users()
@@ -79,9 +114,11 @@ class HistoryMonitor:
         return normalized_count < request_limit
 
     async def sync_recent_items(self, db: Session, libraries: list[Library]) -> int:
+        started = time.perf_counter()
         imported = 0
         request_limit = 5000
         for library in libraries:
+            library_started = time.perf_counter()
             try:
                 payload = await self.client.get_library_items(library.abs_library_id, limit=request_limit)
             except Exception as exc:
@@ -90,15 +127,22 @@ class HistoryMonitor:
 
             items = normalize_media_item_payload(payload, library.abs_library_id, library.name)
             current_ids = {item["abs_item_id"] for item in items if item.get("abs_item_id")}
+            existing_map = self._media_items_by_abs_id(db, current_ids)
+            now = utcnow()
 
             for item in items:
-                existing = db.query(MediaItem).filter_by(abs_item_id=item["abs_item_id"]).first()
+                item_id = item.get("abs_item_id")
+                if not item_id:
+                    continue
+                existing = existing_map.get(item_id)
                 if existing:
                     for key, value in item.items():
                         setattr(existing, key, value)
-                    existing.updated_at = utcnow()
+                    existing.updated_at = now
                 else:
-                    db.add(MediaItem(**item, updated_at=utcnow()))
+                    existing = MediaItem(**item, updated_at=now)
+                    db.add(existing)
+                    existing_map[item_id] = existing
                     imported += 1
 
             if current_ids and self._can_prune_library_items(payload, len(items), request_limit):
@@ -111,13 +155,29 @@ class HistoryMonitor:
                 if deleted:
                     log.info("Pruned %s deleted media item(s) from library %s", deleted, library.name)
 
+            library_elapsed = time.perf_counter() - library_started
+            if library_elapsed >= 2:
+                log.info(
+                    "Recent item sync for library %s completed in %.2fs (%s item(s))",
+                    library.name,
+                    library_elapsed,
+                    len(items),
+                )
+
         db.commit()
+        elapsed = time.perf_counter() - started
+        if elapsed >= 2:
+            log.info("Recent item sync completed in %.2fs (%s imported)", elapsed, imported)
         return imported
 
-
-    def _enrich_history_row_from_media(self, db: Session, row: dict) -> None:
+    def _enrich_history_row_from_media_maps(
+        self,
+        row: dict,
+        media_map: dict[str, MediaItem],
+        library_map: dict[str, Library],
+    ) -> None:
         item_id = row.get("abs_item_id") or ""
-        media_item = db.query(MediaItem).filter_by(abs_item_id=item_id).first() if item_id else None
+        media_item = media_map.get(item_id)
         if media_item:
             if not row.get("title") or row.get("title") == "Unknown":
                 row["title"] = media_item.title or row.get("title") or "Unknown"
@@ -132,16 +192,17 @@ class HistoryMonitor:
 
         library_id = row.get("library_id") or ""
         if library_id and not row.get("library_name"):
-            library = db.query(Library).filter_by(abs_library_id=library_id).first()
+            library = library_map.get(library_id)
             if library:
                 row["library_name"] = library.name or ""
 
-
     async def poll(self, db: Session) -> int:
+        started = time.perf_counter()
         users = await self.sync_users(db)
         libraries = await self.sync_libraries(db)
         await self.sync_recent_items(db, libraries)
         usernames = friendly_names(db)
+        library_map = self._libraries_by_abs_id(db)
 
         imported = 0
         for user in users:
@@ -154,17 +215,41 @@ class HistoryMonitor:
                 continue
 
             rows = normalize_history_payload(payload)
+            item_ids = {row.get("abs_item_id") for row in rows if row.get("abs_item_id")}
+            session_ids = {row.get("abs_session_id") for row in rows if row.get("abs_session_id")}
+            media_map = self._media_items_by_abs_id(db, item_ids)
+            existing_map = self._history_by_session_id(db, session_ids)
+
+            user_started = time.perf_counter()
             for row in rows:
                 if row["abs_user_id"] in usernames:
                     row["username"] = usernames[row["abs_user_id"]]
-                self._enrich_history_row_from_media(db, row)
-                existing = db.query(ListeningHistory).filter_by(abs_session_id=row["abs_session_id"]).first()
+                self._enrich_history_row_from_media_maps(row, media_map, library_map)
+
+                session_id = row.get("abs_session_id") or ""
+                existing = existing_map.get(session_id)
                 row["raw_json"] = json.dumps(row["raw_json"], default=str)
                 if existing:
                     for key, value in row.items():
                         setattr(existing, key, value)
                 else:
-                    db.add(ListeningHistory(**row))
+                    existing = ListeningHistory(**row)
+                    db.add(existing)
+                    if session_id:
+                        existing_map[session_id] = existing
                     imported += 1
+
+            user_elapsed = time.perf_counter() - user_started
+            if user_elapsed >= 2:
+                log.info(
+                    "History row processing for user %s completed in %.2fs (%s row(s))",
+                    user.username,
+                    user_elapsed,
+                    len(rows),
+                )
+
         db.commit()
+        elapsed = time.perf_counter() - started
+        if elapsed >= 2:
+            log.info("History poll completed in %.2fs (%s imported)", elapsed, imported)
         return imported
