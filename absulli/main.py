@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from absulli import __version__
 from absulli.core.config import get_settings
 from absulli.core.logging import configure_logging
+from absulli.core.cover_cache import prune_cover_cache
 from absulli.database.session import init_db
 from absulli.core.security import SecurityHeadersMiddleware
 from absulli.core.setup_state import is_setup_complete, warm_setup_state_cache
@@ -23,6 +24,7 @@ scheduler = AbsulliScheduler(settings)
 async def lifespan(app: FastAPI):
     init_db()
     warm_setup_state_cache()
+    prune_cover_cache(settings.data_dir)
     scheduler.start()
     yield
     await scheduler.shutdown()

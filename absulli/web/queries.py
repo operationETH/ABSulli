@@ -265,6 +265,7 @@ def build_library_cards(db: Session):
             MediaItem.author,
             func.count(MediaItem.id).label("items"),
             func.min(MediaItem.author_id).label("author_id"),
+            func.min(MediaItem.abs_item_id).label("cover_item_id"),
         )
         .filter(MediaItem.author != "")
         .group_by(MediaItem.author)
@@ -277,13 +278,13 @@ def build_library_cards(db: Session):
             "name": name or "Unknown",
             "value": compact_number(value),
             "author_id": author_id or "",
-            "author_cover_url": f"/covers/authors/by-name/{quote(name or 'Unknown', safe='')}",
+            "cover_item_id": cover_item_id or "",
             "url": f"/authors/{quote(name or 'Unknown', safe='')}",
         }
-        for name, value, author_id in authors
+        for name, value, author_id, cover_item_id in authors
     ]
     cover_author_id = next((item["author_id"] for item in author_rows if item.get("author_id")), "")
-    cover_author_url = next((item["author_cover_url"] for item in author_rows if item.get("author_cover_url")), "")
+    cover_item_id = next((item["cover_item_id"] for item in author_rows if item.get("cover_item_id")), "")
     return [
         {"title": "Libraries", "icon": "▤", "bg": "linear-gradient(135deg,#6f6645,#2f2e27)", "items": library_rows, "wide": False},
         {"title": "Media Types", "icon": "◫", "bg": "linear-gradient(135deg,#565656,#2e2e2e)", "items": top_rows(item_types), "wide": False},
@@ -293,7 +294,7 @@ def build_library_cards(db: Session):
             "bg": "linear-gradient(135deg,#4d647a,#27313b)",
             "items": author_rows,
             "cover_author_id": cover_author_id,
-            "cover_url": cover_author_url,
+            "cover_item_id": cover_item_id,
             "wide": False,
         },
     ]

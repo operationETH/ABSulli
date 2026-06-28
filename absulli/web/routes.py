@@ -12,6 +12,15 @@ from sqlalchemy.orm import Session
 from absulli import __version__
 from absulli.core.config import get_settings
 from absulli.core.time import utcnow
+from absulli.core.cover_cache import (
+    COVER_CACHE_CONTROL,
+    NEGATIVE_COVER_CACHE_CONTROL,
+    cover_cache_key,
+    cover_response_headers,
+    read_cover_cache,
+    write_cover_cache,
+    write_negative_cover_cache,
+)
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationEvent
 from absulli.database.session import get_db
 from absulli.http.abs_client import AudiobookshelfClient
@@ -142,6 +151,27 @@ def author_exists(db: Session, author_id: str) -> bool:
         .first()
         is not None
     )
+
+
+
+def cached_cover_response_or_404(cached, detail: str):
+    if not cached:
+        return None
+    if not cached.found:
+        raise HTTPException(
+            status_code=404,
+            detail=detail,
+            headers=cover_response_headers(cached.cache_control, hit=True),
+        )
+    return Response(
+        content=cached.content,
+        media_type=cached.content_type,
+        headers=cover_response_headers(cached.cache_control, hit=True),
+    )
+
+
+def cache_cover_not_found(settings, cache_key: str) -> None:
+    write_negative_cover_cache(settings.data_dir, cache_key)
 
 
 def safe_next_url(value: str | None) -> str:
@@ -462,9 +492,15 @@ async def item_cover(
     height = clamp_image_dimension(height)
     fmt = clean_image_format(fmt)
     settings = get_settings()
+    cache_key = cover_cache_key("item", item_id, width, height, fmt)
+
+    cached_response = cached_cover_response_or_404(read_cover_cache(settings.data_dir, cache_key), "Cover not found")
+    if cached_response:
+        return cached_response
+
     try:
         async with AudiobookshelfClient(settings) as client:
-            content, content_type, cache_control = await client.get_item_cover(
+            content, content_type, _cache_control = await client.get_item_cover(
                 item_id=item_id,
                 width=width,
                 height=height,
@@ -472,13 +508,19 @@ async def item_cover(
             )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Cover not found") from exc
+            cache_cover_not_found(settings, cache_key)
+            raise HTTPException(
+                status_code=404,
+                detail="Cover not found",
+                headers=cover_response_headers(NEGATIVE_COVER_CACHE_CONTROL, hit=False),
+            ) from exc
         raise HTTPException(status_code=502, detail="Audiobookshelf cover request failed") from exc
 
+    write_cover_cache(settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
     return Response(
         content=content,
         media_type=content_type,
-        headers={"Cache-Control": cache_control},
+        headers=cover_response_headers(COVER_CACHE_CONTROL, hit=False),
     )
 
 
@@ -498,6 +540,11 @@ async def author_cover_by_name(
     height = clamp_image_dimension(height)
     fmt = clean_image_format(fmt)
     settings = get_settings()
+    cache_key = cover_cache_key("author-name", author_name.casefold(), width, height, fmt)
+
+    cached_response = cached_cover_response_or_404(read_cover_cache(settings.data_dir, cache_key), "Author image not found")
+    if cached_response:
+        return cached_response
 
     try:
         async with AudiobookshelfClient(settings) as client:
@@ -505,8 +552,13 @@ async def author_cover_by_name(
             author_payload = await client.find_author_in_libraries(author_name, library_ids)
             author_id = author_payload_value(author_payload, "id", "authorId", "_id", "asin")
             if not author_id:
-                raise HTTPException(status_code=404, detail="Author image not found")
-            content, content_type, cache_control = await client.get_author_image(
+                cache_cover_not_found(settings, cache_key)
+                raise HTTPException(
+                    status_code=404,
+                    detail="Author image not found",
+                    headers=cover_response_headers(NEGATIVE_COVER_CACHE_CONTROL, hit=False),
+                )
+            content, content_type, _cache_control = await client.get_author_image(
                 author_id=author_id,
                 width=width,
                 height=height,
@@ -516,13 +568,19 @@ async def author_cover_by_name(
         raise
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Author image not found") from exc
+            cache_cover_not_found(settings, cache_key)
+            raise HTTPException(
+                status_code=404,
+                detail="Author image not found",
+                headers=cover_response_headers(NEGATIVE_COVER_CACHE_CONTROL, hit=False),
+            ) from exc
         raise HTTPException(status_code=502, detail="Audiobookshelf author image request failed") from exc
 
+    write_cover_cache(settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
     return Response(
         content=content,
         media_type=content_type,
-        headers={"Cache-Control": cache_control},
+        headers=cover_response_headers(COVER_CACHE_CONTROL, hit=False),
     )
 
 
@@ -542,9 +600,15 @@ async def author_cover(
     height = clamp_image_dimension(height)
     fmt = clean_image_format(fmt)
     settings = get_settings()
+    cache_key = cover_cache_key("author", author_id, width, height, fmt)
+
+    cached_response = cached_cover_response_or_404(read_cover_cache(settings.data_dir, cache_key), "Author image not found")
+    if cached_response:
+        return cached_response
+
     try:
         async with AudiobookshelfClient(settings) as client:
-            content, content_type, cache_control = await client.get_author_image(
+            content, content_type, _cache_control = await client.get_author_image(
                 author_id=author_id,
                 width=width,
                 height=height,
@@ -552,13 +616,19 @@ async def author_cover(
             )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Author image not found") from exc
+            cache_cover_not_found(settings, cache_key)
+            raise HTTPException(
+                status_code=404,
+                detail="Author image not found",
+                headers=cover_response_headers(NEGATIVE_COVER_CACHE_CONTROL, hit=False),
+            ) from exc
         raise HTTPException(status_code=502, detail="Audiobookshelf author image request failed") from exc
 
+    write_cover_cache(settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
     return Response(
         content=content,
         media_type=content_type,
-        headers={"Cache-Control": cache_control},
+        headers=cover_response_headers(COVER_CACHE_CONTROL, hit=False),
     )
 
 
@@ -568,7 +638,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     stat_metric = clean_stat_metric(request.query_params.get("metric"))
     stat_days = clamp_days(request.query_params.get("days"), default=30)
     recent_type = clean_recent_type(request.query_params.get("recent_type"))
-    recent_limit = clamp_recent_limit(request.query_params.get("recent_limit"), default=50)
+    recent_limit = clamp_recent_limit(request.query_params.get("recent_limit"), default=20)
     active = active_sessions_query(db).order_by(desc(ActivitySession.last_seen_at)).all()
     enrich_active_rows(db, active)
     since = utcnow() - timedelta(days=stat_days)
@@ -726,6 +796,14 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
         author_payload_value(author_payload, "description", "desc", "bio", "biography", "summary")
     )
 
+    cover_item_id = author_cover_item_id(db, author_name)
+    if author_id:
+        author_cover_url = f"/covers/authors/{quote(author_id, safe='')}"
+    elif cover_item_id:
+        author_cover_url = f"/covers/items/{quote(cover_item_id, safe='')}"
+    else:
+        author_cover_url = ""
+
     return templates.TemplateResponse(
         request,
         "author_detail.html",
@@ -733,13 +811,13 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
             "page": "history",
             "author": author_name,
             "author_id": author_id,
-            "author_cover_url": f"/covers/authors/by-name/{quote(author_name, safe='')}",
+            "author_cover_url": author_cover_url,
             "author_description": description,
             "books": books,
             "rows": rows,
             "history_user_url": history_user_url,
             **history_page_size_context(limit),
-            "cover_item_id": author_cover_item_id(db, author_name),
+            "cover_item_id": cover_item_id,
             "window_stats": author_window_stats(db, author_name),
             "user_stats": author_user_stats(db, author_name),
             "fmt_seconds": fmt_seconds,

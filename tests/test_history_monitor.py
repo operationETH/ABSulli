@@ -330,7 +330,10 @@ def test_enrich_history_row_uses_library_name_when_media_item_has_only_library_i
         "library_id": "",
         "library_name": "",
     }
-    HistoryMonitor(FakeClient())._enrich_history_row_from_media(db, row)
+    monitor = HistoryMonitor(FakeClient())
+    media_map = monitor._media_items_by_abs_id(db, ["item-1"])
+    library_map = monitor._libraries_by_abs_id(db)
+    monitor._enrich_history_row_from_media_maps(row, media_map, library_map)
 
     assert row == {
         "abs_item_id": "item-1",
@@ -590,7 +593,10 @@ def test_enrich_history_row_without_prefetched_lookups_uses_database_fallbacks()
         "library_name": "",
     }
 
-    HistoryMonitor(FakeClient())._enrich_history_row_from_media(db, row)
+    monitor = HistoryMonitor(FakeClient())
+    media_map = monitor._media_items_by_abs_id(db, ["item-1"])
+    library_map = monitor._libraries_by_abs_id(db)
+    monitor._enrich_history_row_from_media_maps(row, media_map, library_map)
 
     assert row["title"] == "Fallback Title"
     assert row["author"] == "Fallback Author"

@@ -148,9 +148,11 @@
   {% for card in library_cards %}
     <article class="stat-card {{ 'wide' if card['wide'] else '' }}" data-card-bg="{{ card['bg'] }}">
       <div class="stat-bg"></div>
-      <div class="stat-media {{ 'has-cover' if card.get('cover_url') or card.get('cover_author_id') else '' }}" data-icon="{{ card['icon'] }}">
+      <div class="stat-media {{ 'has-cover' if card.get('cover_url') or card.get('cover_item_id') or card.get('cover_author_id') else '' }}" data-icon="{{ card['icon'] }}">
         {% if card.get('cover_url') %}
           <img src="{{ card['cover_url'] }}?width=160" alt="{{ card['title'] }} thumbnail" loading="lazy">
+        {% elif card.get('cover_item_id') %}
+          <img src="/covers/items/{{ card['cover_item_id'] }}?width=160" alt="{{ card['title'] }} thumbnail" loading="lazy">
         {% elif card.get('cover_author_id') %}
           <img src="/covers/authors/{{ card['cover_author_id'] }}?width=160" alt="{{ card['title'] }} thumbnail" loading="lazy">
         {% else %}
@@ -165,7 +167,7 @@
           <table class="stat-table">
             <tbody>
               {% for item in card["items"] %}
-              <tr{% if item.get('author_cover_url') %} data-hover-cover="{{ item['author_cover_url'] }}?width=160"{% elif item.get('author_id') %} data-hover-cover="/covers/authors/{{ item['author_id'] }}?width=160"{% elif item.get('item_id') %} data-hover-cover="/covers/items/{{ item['item_id'] }}?width=160"{% endif %}>
+              <tr{% if item.get('cover_item_id') %} data-hover-cover="/covers/items/{{ item['cover_item_id'] }}?width=160"{% elif item.get('author_id') %} data-hover-cover="/covers/authors/{{ item['author_id'] }}?width=160"{% elif item.get('item_id') %} data-hover-cover="/covers/items/{{ item['item_id'] }}?width=160"{% endif %}>
                 <td class="rank">{{ loop.index }}</td>
                 <td class="item-name" title="{{ item['name'] }}">
                   {% if item.get('url') %}

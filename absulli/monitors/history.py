@@ -279,19 +279,6 @@ class HistoryMonitor:
             log.info("Recent item sync completed in %.2fs (%s imported)", elapsed, imported)
         return imported
 
-    def _enrich_history_row_from_media(self, db: Session, row: dict) -> None:
-        item_id = row.get("abs_item_id") or ""
-        media_map = self._media_items_by_abs_id(db, [item_id]) if item_id else {}
-        library_ids = {row.get("library_id") or ""}
-        media_item = media_map.get(item_id)
-        if media_item and media_item.library_id:
-            library_ids.add(media_item.library_id)
-        library_map: dict[str, Library] = {}
-        for chunk in self._chunks(library_ids):
-            for library in db.query(Library).filter(Library.abs_library_id.in_(chunk)).all():
-                library_map[library.abs_library_id] = library
-        self._enrich_history_row_from_media_maps(row, media_map, library_map)
-
     def _enrich_history_row_from_media_maps(
         self,
         row: dict,
