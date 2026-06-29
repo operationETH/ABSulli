@@ -7,7 +7,7 @@ SQLAlchemy==2.0.51
 Jinja2==3.1.6
 python-multipart==0.0.32
 prometheus-client==0.25.0
-APScheduler==3.11.2
+APScheduler==3.11.3
 itsdangerous==2.2.0
 
 alembic==1.18.4
