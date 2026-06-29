@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from sqlalchemy import desc, func, or_
+from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
 from absulli.core.time import utcnow
@@ -14,9 +14,22 @@ def active_cutoff() -> datetime:
 
 def active_sessions_query(db: Session):
     cutoff = active_cutoff()
+    known_title = func.lower(func.coalesce(ActivitySession.title, "")).notin_(("", "unknown"))
+    known_media_type = func.lower(func.coalesce(ActivitySession.media_type, "")).notin_(("", "unknown"))
+    has_item_id = func.coalesce(ActivitySession.abs_item_id, "") != ""
+    has_timing = or_(
+        func.coalesce(ActivitySession.duration, 0) > 0,
+        func.coalesce(ActivitySession.current_time, 0) > 0,
+        func.coalesce(ActivitySession.time_listening, 0) > 0,
+    )
     return db.query(ActivitySession).filter(
         ActivitySession.is_active.is_(True),
         func.coalesce(ActivitySession.updated_at, ActivitySession.last_seen_at) >= cutoff,
+        or_(
+            has_item_id,
+            has_timing,
+            and_(known_title, known_media_type),
+        ),
     )
 
 

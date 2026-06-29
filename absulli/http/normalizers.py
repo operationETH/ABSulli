@@ -142,16 +142,98 @@ def extract_device_fields(row: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def normalize_online_payload(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
+UNKNOWN_TEXTS = {"", "unknown", "none", "null"}
+
+
+def is_unknown_text(value: Any) -> bool:
+    return safe_text(value).strip().casefold() in UNKNOWN_TEXTS
+
+
+def _has_playback_shape(row: dict[str, Any]) -> bool:
+    item = row.get("libraryItem") or row.get("mediaItem") or row.get("item") or {}
+    media = item.get("media") if isinstance(item, dict) else None
+    if row.get("media"):
+        media = row.get("media")
+
+    if isinstance(item, dict) and item:
+        return True
+    if isinstance(media, dict) and media:
+        return True
+    if first_present(row, "libraryItemId", "mediaItemId", "itemId", default=""):
+        return True
+
+    title = safe_text(first_present(row, "displayTitle", "title", default=""))
+    media_type = safe_text(first_present(row, "mediaType", "type", default=""))
+    has_timing = any(
+        safe_float(first_present(row, key, default=0)) > 0
+        for key in ("duration", "currentTime", "timeListening", "durationListening")
+    )
+    return (not is_unknown_text(title) or not is_unknown_text(media_type)) and has_timing
+
+
+def _merge_user_context(session: dict[str, Any], user_row: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(session)
+    user = merged.get("user") if isinstance(merged.get("user"), dict) else {}
+    merged["user"] = {**user_row, **user}
+    for source_key, target_key in (("id", "userId"), ("username", "username"), ("name", "username")):
+        if not merged.get(target_key) and user_row.get(source_key):
+            merged[target_key] = user_row[source_key]
+    return merged
+
+
+def _online_rows(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
     if isinstance(payload, list):
-        rows = payload
+        candidates = payload
     else:
-        rows = payload.get("openSessions") or payload.get("sessions") or payload.get("usersOnline") or []
+        candidates = (
+            payload.get("openSessions")
+            or payload.get("sessions")
+            or payload.get("activeSessions")
+            or payload.get("listeningSessions")
+            or payload.get("usersOnline")
+            or []
+        )
+
+    rows: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+
+        nested_session = first_present(
+            candidate,
+            "currentListeningSession",
+            "listeningSession",
+            "currentSession",
+            "session",
+            default={},
+        )
+        if isinstance(nested_session, dict) and nested_session:
+            rows.append(_merge_user_context(nested_session, candidate))
+            continue
+
+        if _has_playback_shape(candidate):
+            rows.append(candidate)
+
+    return rows
+
+
+def _normalized_is_playback_session(session: dict[str, Any]) -> bool:
+    if session.get("abs_item_id"):
+        return True
+    if safe_float(session.get("duration")) > 0 or safe_float(session.get("current_time")) > 0:
+        return True
+    if safe_float(session.get("time_listening")) > 0:
+        return True
+    if not is_unknown_text(session.get("title")) and not is_unknown_text(session.get("media_type")):
+        return True
+    return False
+
+
+def normalize_online_payload(payload: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
+    rows = _online_rows(payload)
     now = utcnow()
     normalized: list[dict[str, Any]] = []
     for row in rows:
-        if not isinstance(row, dict):
-            continue
         item = row.get("libraryItem") or row.get("mediaItem") or row.get("item") or {}
         media = item.get("media") or row.get("media") or {}
         user = row.get("user") or {}
@@ -165,28 +247,28 @@ def normalize_online_payload(payload: dict[str, Any] | list[Any]) -> list[dict[s
         started = parse_ts(first_present(row, "startedAt", "startTime", "createdAt", default=None))
         updated = parse_ts(first_present(row, "updatedAt", "lastUpdate", default=None))
         device_fields = extract_device_fields(row)
-        normalized.append(
-            {
-                "session_key": session_id,
-                "abs_user_id": user_id,
-                "username": safe_text(first_present(row, "username", default=first_present(user, "username", "name", default=user_id))),
-                "abs_item_id": safe_text(first_present(row, "libraryItemId", "mediaItemId", default=first_present(item, "id", default=""))),
-                "title": title,
-                "author": extract_author(row, item, media),
-                "media_type": safe_text(first_present(row, "mediaType", default=first_present(item, "mediaType", "type", default="unknown"))),
-                "library_id": extract_library_id(row, item),
-                "library_name": extract_library_name(row, item),
-                **device_fields,
-                "ip_address": safe_text(first_present(row, "ipAddress", "ip", default=""), "ipAddress", "ip"),
-                "started_at": started or now,
-                "updated_at": updated,
-                "current_time": current_time,
-                "duration": duration,
-                "time_listening": time_listening,
-                "progress": progress,
-                "last_seen_at": now,
-            }
-        )
+        session = {
+            "session_key": session_id,
+            "abs_user_id": user_id,
+            "username": safe_text(first_present(row, "username", default=first_present(user, "username", "name", default=user_id))),
+            "abs_item_id": safe_text(first_present(row, "libraryItemId", "mediaItemId", "itemId", default=first_present(item, "id", default=""))),
+            "title": title,
+            "author": extract_author(row, item, media),
+            "media_type": safe_text(first_present(row, "mediaType", default=first_present(item, "mediaType", "type", default="unknown"))),
+            "library_id": extract_library_id(row, item),
+            "library_name": extract_library_name(row, item),
+            **device_fields,
+            "ip_address": safe_text(first_present(row, "ipAddress", "ip", default=""), "ipAddress", "ip"),
+            "started_at": started or now,
+            "updated_at": updated,
+            "current_time": current_time,
+            "duration": duration,
+            "time_listening": time_listening,
+            "progress": progress,
+            "last_seen_at": now,
+        }
+        if _normalized_is_playback_session(session):
+            normalized.append(session)
     return normalized
 
 
