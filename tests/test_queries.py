@@ -5,8 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from absulli.core.time import utcnow
-from absulli.database.models import Base, Library, ListeningHistory, MediaItem
-from absulli.web.queries import accumulate_history_stats, build_home_cards, window_stats_for_history
+from absulli.database.models import ActivitySession, Base, Library, ListeningHistory, MediaItem
+from absulli.web.queries import active_sessions_query, accumulate_history_stats, build_home_cards, window_stats_for_history
 
 
 def make_db():
@@ -46,6 +46,45 @@ def history_row(
         client=client,
     )
 
+
+
+def test_active_sessions_query_filters_incomplete_online_user_rows():
+    db = make_db()
+    now = utcnow()
+    db.add_all(
+        [
+            ActivitySession(
+                session_key="ghost-user",
+                abs_user_id="user-1",
+                username="admin",
+                title="Unknown",
+                media_type="unknown",
+                current_time=0,
+                duration=0,
+                time_listening=0,
+                is_active=True,
+                last_seen_at=now,
+            ),
+            ActivitySession(
+                session_key="real-session",
+                abs_user_id="user-1",
+                username="admin",
+                abs_item_id="item-1",
+                title="Real Book",
+                media_type="book",
+                current_time=30,
+                duration=300,
+                is_active=True,
+                last_seen_at=now,
+            ),
+        ]
+    )
+    db.commit()
+
+    rows = active_sessions_query(db).all()
+
+    assert [row.session_key for row in rows] == ["real-session"]
+    db.close()
 
 def test_accumulate_history_stats_groups_sorts_and_limits_rows():
     rows = [

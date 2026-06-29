@@ -138,6 +138,51 @@ def test_normalize_online_payload_calculates_progress_and_device_fields():
     assert row["ip_address"] == "192.168.0.10"
 
 
+
+def test_normalize_online_payload_ignores_users_online_without_playback_data():
+    rows = normalize_online_payload(
+        {
+            "usersOnline": [
+                {
+                    "id": "user-1",
+                    "username": "admin",
+                    "displayName": "Admin",
+                    "lastSeen": "2026-06-09T20:10:00Z",
+                }
+            ]
+        }
+    )
+
+    assert rows == []
+
+
+def test_normalize_online_payload_supports_nested_user_session_data():
+    rows = normalize_online_payload(
+        {
+            "usersOnline": [
+                {
+                    "id": "user-1",
+                    "username": "admin",
+                    "currentListeningSession": {
+                        "id": "session-1",
+                        "libraryItemId": "item-1",
+                        "displayTitle": "Active Book",
+                        "mediaType": "book",
+                        "duration": 500,
+                        "currentTime": 125,
+                    },
+                }
+            ]
+        }
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["session_key"] == "session-1"
+    assert rows[0]["abs_user_id"] == "user-1"
+    assert rows[0]["username"] == "admin"
+    assert rows[0]["title"] == "Active Book"
+    assert rows[0]["progress"] == 25
+
 def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     rows = normalize_media_item_payload(
         {
