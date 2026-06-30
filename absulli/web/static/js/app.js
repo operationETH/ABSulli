@@ -244,6 +244,11 @@ function initializeHoverCovers(root = document) {
       const setHover = () => {
         const image = ensureImage();
         image.src = row.dataset.hoverCover;
+        if (row.dataset.hoverFallbackCover) {
+          image.dataset.fallbackSrc = row.dataset.hoverFallbackCover;
+        } else {
+          image.removeAttribute('data-fallback-src');
+        }
         image.alt = `${row.querySelector('.item-name')?.textContent?.trim() || 'Selected item'} cover`;
         media.classList.add('is-hovering');
       };
@@ -398,6 +403,23 @@ document.addEventListener('error', (event) => {
   if (!(image instanceof HTMLImageElement)) return;
 
   if (image.classList.contains('js-author-image')) {
+    const fallbackSrc = image.dataset.fallbackSrc || '';
+    if (fallbackSrc) {
+      const fallbackUrl = new URL(fallbackSrc, window.location.href).href;
+      if (image.src !== fallbackUrl) {
+        image.src = fallbackSrc;
+        image.removeAttribute('data-fallback-src');
+
+        const hero = image.closest('[data-fallback-media-bg]');
+        const fallbackBg = hero?.dataset.fallbackMediaBg || '';
+        if (fallbackBg) {
+          hero.style.setProperty('--media-bg', `url('${fallbackBg.replaceAll("'", "%27")}')`);
+          hero.removeAttribute('data-fallback-media-bg');
+        }
+        return;
+      }
+    }
+
     const poster = image.closest('.media-poster');
     if (poster) poster.classList.add('poster-fallback');
     image.remove();
@@ -406,6 +428,17 @@ document.addEventListener('error', (event) => {
 
   const statMedia = image.closest('.stat-media');
   if (statMedia) {
+    const fallbackSrc = image.dataset.fallbackSrc || '';
+    if (fallbackSrc) {
+      const fallbackUrl = new URL(fallbackSrc, window.location.href).href;
+      if (image.src !== fallbackUrl) {
+        image.src = fallbackSrc;
+        image.removeAttribute('data-fallback-src');
+        statMedia.classList.add('has-cover');
+        return;
+      }
+    }
+
     const icon = statMedia.dataset.icon || '▤';
     statMedia.classList.remove('has-cover', 'is-hovering');
     statMedia.innerHTML = `<span>${escapeHtml(icon)}</span>`;

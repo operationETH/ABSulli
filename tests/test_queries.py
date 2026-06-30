@@ -1,4 +1,3 @@
-
 from datetime import timedelta
 
 from sqlalchemy import create_engine
@@ -6,7 +5,13 @@ from sqlalchemy.orm import sessionmaker
 
 from absulli.core.time import utcnow
 from absulli.database.models import ActivitySession, Base, Library, ListeningHistory, MediaItem
-from absulli.web.queries import active_sessions_query, accumulate_history_stats, build_home_cards, window_stats_for_history
+from absulli.web.queries import (
+    active_sessions_query,
+    accumulate_history_stats,
+    build_home_cards,
+    build_library_cards,
+    window_stats_for_history,
+)
 
 
 def make_db():
@@ -47,7 +52,6 @@ def history_row(
     )
 
 
-
 def test_active_sessions_query_filters_incomplete_online_user_rows():
     db = make_db()
     now = utcnow()
@@ -85,6 +89,7 @@ def test_active_sessions_query_filters_incomplete_online_user_rows():
 
     assert [row.session_key for row in rows] == ["real-session"]
     db.close()
+
 
 def test_accumulate_history_stats_groups_sorts_and_limits_rows():
     rows = [
@@ -206,6 +211,45 @@ def test_build_home_cards_returns_expected_count_cards_from_history():
     }
 
     assert cards_by_title["Most Active Platforms"]["items"][0] == {"name": "Web", "value": "2"}
+    db.close()
+
+
+def test_build_library_cards_authors_include_author_cover_and_book_fallback():
+    db = make_db()
+    db.add_all(
+        [
+            MediaItem(
+                abs_item_id="book-1",
+                media_type="book",
+                title="Book One",
+                author="Author One",
+                author_id="author-1",
+            ),
+            MediaItem(
+                abs_item_id="book-2",
+                media_type="book",
+                title="Book Two",
+                author="Author One",
+                author_id="author-1",
+            ),
+        ]
+    )
+    db.commit()
+
+    cards = build_library_cards(db)
+    authors_card = next(card for card in cards if card["title"] == "Authors")
+
+    assert authors_card["cover_author_id"] == "author-1"
+    assert authors_card["cover_author_name"] == "Author One"
+    assert authors_card["cover_item_id"] == "book-1"
+    assert authors_card["items"][0] == {
+        "name": "Author One",
+        "value": "2",
+        "author_id": "author-1",
+        "author_name": "Author One",
+        "cover_item_id": "book-1",
+        "url": "/authors/Author%20One",
+    }
     db.close()
 
 

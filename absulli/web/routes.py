@@ -797,12 +797,8 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
     )
 
     cover_item_id = author_cover_item_id(db, author_name)
-    if author_id:
-        author_cover_url = f"/covers/authors/{quote(author_id, safe='')}"
-    elif cover_item_id:
-        author_cover_url = f"/covers/items/{quote(cover_item_id, safe='')}"
-    else:
-        author_cover_url = ""
+    fallback_author_cover_url = f"/covers/items/{quote(cover_item_id, safe='')}" if cover_item_id else ""
+    author_cover_url = f"/covers/authors/by-name/{quote(author_name, safe='')}"
 
     return templates.TemplateResponse(
         request,
@@ -812,6 +808,7 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
             "author": author_name,
             "author_id": author_id,
             "author_cover_url": author_cover_url,
+            "fallback_author_cover_url": fallback_author_cover_url,
             "author_description": description,
             "books": books,
             "rows": rows,
