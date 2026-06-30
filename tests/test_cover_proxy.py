@@ -48,6 +48,10 @@ class FakeCoverClient:
             raise httpx.HTTPStatusError("not found", request=request, response=response)
         return b"author-image", "image/jpeg", "public, max-age=88"
 
+    async def get_author(self, author_id):
+        self.calls.append(("get_author", {"author_id": author_id}))
+        return {"id": author_id, "description": "Known author"}
+
     async def find_author_in_libraries(self, author_name, library_ids):
         self.calls.append(("find_author", {"author_name": author_name, "library_ids": library_ids}))
         return self.find_author_payload
@@ -280,5 +284,21 @@ def test_author_cover_by_name_negative_cache_prevents_repeated_lookup(monkeypatc
         assert FakeCoverClient.calls == [
             ("find_author", {"author_name": "Missing Author", "library_ids": ["lib-1"]})
         ]
+    finally:
+        db.close()
+
+
+def test_author_detail_uses_book_cover_as_author_image_fallback(monkeypatch):
+    client, db = make_client(monkeypatch)
+    try:
+        db.add(MediaItem(abs_item_id="book-1", title="Known Book", author="Lee Child", author_id="author-1"))
+        db.commit()
+
+        response = client.get("/authors/Lee%20Child")
+
+        assert response.status_code == 200
+        assert 'src="/covers/authors/by-name/Lee%20Child?width=420"' in response.text
+        assert 'data-fallback-src="/covers/items/book-1?width=420"' in response.text
+        assert 'data-fallback-media-bg="/covers/items/book-1?width=1000"' in response.text
     finally:
         db.close()

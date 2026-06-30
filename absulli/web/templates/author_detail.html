@@ -9,7 +9,7 @@
   <strong>{{ author }}</strong>
 </nav>
 
-<section class="media-hero author-hero"{% if author_cover_url %} data-media-bg="{{ author_cover_url }}?width=1000"{% endif %}>
+<section class="media-hero author-hero"{% if author_cover_url %} data-media-bg="{{ author_cover_url }}?width=1000"{% endif %}{% if fallback_author_cover_url and fallback_author_cover_url != author_cover_url %} data-fallback-media-bg="{{ fallback_author_cover_url }}?width=1000"{% endif %}>
   <div class="media-hero-shade"></div>
 
   <div class="media-poster author-poster">
@@ -17,6 +17,7 @@
       <img
         class="js-author-image"
         src="{{ author_cover_url }}?width=420"
+        {% if fallback_author_cover_url and fallback_author_cover_url != author_cover_url %}data-fallback-src="{{ fallback_author_cover_url }}?width=420"{% endif %}
         alt="{{ author }} image"
         loading="lazy"
       >
