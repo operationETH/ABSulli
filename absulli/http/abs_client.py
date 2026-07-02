@@ -215,10 +215,10 @@ class AudiobookshelfClient:
     async def get_libraries(self) -> dict[str, Any] | list[Any]:
         return await self._get("/api/libraries")
 
-    async def get_library_items(self, library_id: str, limit: int = 5000) -> dict[str, Any] | list[Any]:
+    async def get_library_items(self, library_id: str, limit: int = 5000, page: int = 0) -> dict[str, Any] | list[Any]:
         return await self._get(
             f"/api/libraries/{library_id}/items",
-            params={"limit": limit, "page": 0, "sort": "addedAt", "desc": 1},
+            params={"limit": limit, "page": page, "sort": "addedAt", "desc": 1},
         )
 
     async def get_user_listening_sessions(

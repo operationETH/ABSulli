@@ -171,6 +171,8 @@ class HistoryMonitor:
         current_count = row_count
         if current_count is None:
             current_count = normalized_count if normalized_count is not None else 0
+        if current_count <= 0:
+            return False
 
         loaded = loaded_count
         if loaded is None:
@@ -209,6 +211,42 @@ class HistoryMonitor:
                 return {"sessions": []}
             return await self.client.get_user_listening_sessions(user_id, items_per_page=items_per_page)
 
+    async def _get_library_items_page(self, library_id: str, page: int, limit: int) -> dict | list:
+        try:
+            return await self.client.get_library_items(library_id, limit=limit, page=page)
+        except TypeError:
+            if page > 0:
+                return {"results": []}
+            return await self.client.get_library_items(library_id, limit=limit)
+
+    async def _fetch_library_items(self, library: Library, limit: int) -> tuple[list[dict], int | None, bool]:
+        items: list[dict] = []
+        total: int | None = None
+        page = 0
+        max_pages = 1000
+
+        while page < max_pages:
+            payload = await self._get_library_items_page(library.abs_library_id, page=page, limit=limit)
+            page_items = normalize_media_item_payload(payload, library.abs_library_id, library.name)
+            if total is None:
+                total = self._payload_total(payload)
+            items.extend(page_items)
+
+            if not self._payload_has_next_page(
+                payload,
+                page=page,
+                row_count=len(page_items),
+                page_size=limit,
+                loaded_count=len(items),
+                normalized_count=len(page_items),
+            ):
+                return items, total, True
+
+            page += 1
+
+        log.warning("Stopped library item sync for %s after %s page(s)", library.name, max_pages)
+        return items, total, False
+
     async def _fetch_user_history_rows(self, user_id: str, items_per_page: int = 50) -> list[dict]:
         rows: list[dict] = []
         page = 0
@@ -229,17 +267,15 @@ class HistoryMonitor:
         for library in libraries:
             library_started = time.perf_counter()
             try:
-                payload = await self.client.get_library_items(library.abs_library_id, limit=request_limit)
+                items, total, full_library_loaded = await self._fetch_library_items(library, request_limit)
             except Exception as exc:
                 log.debug("Recent item sync failed for %s: %s", library.name, exc)
                 continue
 
-            items = normalize_media_item_payload(payload, library.abs_library_id, library.name)
             current_ids = {item["abs_item_id"] for item in items if item.get("abs_item_id")}
             existing_map = self._media_items_by_abs_id(db, current_ids)
             now = utcnow()
 
-            total = self._payload_total(payload)
             if total is not None:
                 library.item_count = max(total, 0)
                 library.updated_at = now
@@ -259,7 +295,7 @@ class HistoryMonitor:
                     existing_map[item_id] = existing
                     imported += 1
 
-            if current_ids and self._can_prune_library_items(payload, len(items), request_limit):
+            if current_ids and full_library_loaded:
                 deleted = (
                     db.query(MediaItem)
                     .filter(MediaItem.library_id == library.abs_library_id)
