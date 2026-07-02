@@ -305,6 +305,31 @@ def test_sync_recent_items_updates_existing_items_and_prunes_deleted_items_when_
     db.close()
 
 
+def test_sync_recent_items_saves_library_total_even_when_only_one_result_page_is_imported():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="Audiobooks", media_type="book")
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(
+        library_items={
+            "lib-1": items_payload(
+                media_item_row(id="item-1"),
+                media_item_row(id="item-2"),
+                total=886,
+            )
+        }
+    )
+    monitor = HistoryMonitor(client)
+
+    imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert imported == 2
+    assert db.query(Library).filter_by(abs_library_id="lib-1").one().item_count == 886
+    assert db.query(MediaItem).filter_by(library_id="lib-1").count() == 2
+    db.close()
+
+
 def test_enrich_history_row_uses_library_name_when_media_item_has_only_library_id():
     db = make_db()
     db.add_all(

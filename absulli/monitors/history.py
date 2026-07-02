@@ -239,6 +239,11 @@ class HistoryMonitor:
             existing_map = self._media_items_by_abs_id(db, current_ids)
             now = utcnow()
 
+            total = self._payload_total(payload)
+            if total is not None:
+                library.item_count = max(total, 0)
+                library.updated_at = now
+
             for item in items:
                 item_id = item.get("abs_item_id")
                 if not item_id:
