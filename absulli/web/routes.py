@@ -121,6 +121,71 @@ from absulli.web.settings import (
     field_from_env,
 )
 
+
+def clean_page_number(value: object) -> int:
+    try:
+        page = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return 1
+    return max(page, 1)
+
+
+def pagination_pages(current_page: int, total_pages: int) -> list[int | None]:
+    if total_pages <= 7:
+        return list(range(1, total_pages + 1))
+    pages = {1, total_pages}
+    if current_page <= 2:
+        pages.update(range(2, min(3, total_pages) + 1))
+    elif current_page == 3:
+        pages.update(range(2, min(5, total_pages) + 1))
+    elif current_page >= total_pages - 1:
+        pages.update(range(max(2, total_pages - 2), total_pages))
+    elif current_page == total_pages - 2:
+        pages.update(range(max(2, total_pages - 4), total_pages))
+    else:
+        pages.update(range(current_page - 2, current_page + 3))
+    ordered = sorted(page for page in pages if 1 <= page <= total_pages)
+    result: list[int | None] = []
+    previous = 0
+    for page in ordered:
+        if previous and page - previous > 1:
+            result.append(None)
+        result.append(page)
+        previous = page
+    return result
+
+
+def pagination_url(path: str, page: int, limit: int) -> str:
+    return f"{path}?limit={limit}&page={page}"
+
+
+def pagination_context(request: Request, total: int, limit: int, item_label: str) -> dict[str, object]:
+    total = max(int(total or 0), 0)
+    total_pages = max((total + limit - 1) // limit, 1)
+    current_page = min(clean_page_number(request.query_params.get("page")), total_pages)
+    start = ((current_page - 1) * limit) + 1 if total else 0
+    end = min(current_page * limit, total) if total else 0
+    path = request.url.path
+    return {
+        "pagination": {
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "total": total,
+            "start": start,
+            "end": end,
+            "limit": limit,
+            "item_label": item_label,
+            "pages": pagination_pages(current_page, total_pages) if total else [],
+            "previous_url": pagination_url(path, current_page - 1, limit) if current_page > 1 else "",
+            "next_url": pagination_url(path, current_page + 1, limit) if current_page < total_pages else "",
+            "path": path,
+        }
+    }
+
+
+def query_offset(page: int, limit: int) -> int:
+    return max(page - 1, 0) * limit
+
 def history_user_url(row: ListeningHistory) -> str:
     user_key = (row.abs_user_id or row.username or "").strip()
     if not user_key:
@@ -687,7 +752,16 @@ def activity(request: Request, db: Session = Depends(get_db)):
 @router.get("/history", response_class=HTMLResponse)
 def history(request: Request, db: Session = Depends(get_db)):
     limit = history_page_size(request)
-    rows = db.query(ListeningHistory).order_by(desc(media_history_date())).limit(limit).all()
+    total = db.query(ListeningHistory).count()
+    pagination = pagination_context(request, total, limit, "history entries")
+    current_page = pagination["pagination"]["current_page"]
+    rows = (
+        db.query(ListeningHistory)
+        .order_by(desc(media_history_date()))
+        .offset(query_offset(current_page, limit))
+        .limit(limit)
+        .all()
+    )
     context = {
         "rows": rows,
         "page": "history",
@@ -695,14 +769,26 @@ def history(request: Request, db: Session = Depends(get_db)):
         "history_user_url": history_user_url,
     }
     context.update(history_page_size_context(limit))
+    context.update(pagination)
     return templates.TemplateResponse(request, "history.html", context)
 
 
 
 @router.get("/libraries", response_class=HTMLResponse)
 def libraries(request: Request, db: Session = Depends(get_db)):
+    limit = history_page_size(request)
+    total = db.query(Library).count()
+    pagination = pagination_context(request, total, limit, "synced libraries")
+    current_page = pagination["pagination"]["current_page"]
     rows = []
-    for library in db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all():
+    libraries_query = (
+        db.query(Library)
+        .order_by(Library.display_order.asc(), Library.name.asc())
+        .offset(query_offset(current_page, limit))
+        .limit(limit)
+        .all()
+    )
+    for library in libraries_query:
         imported_count = db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).count()
         item_count = max(int(library.item_count or 0), int(imported_count or 0))
         recent_play = (
@@ -726,7 +812,10 @@ def libraries(request: Request, db: Session = Depends(get_db)):
         {
             "page": "libraries",
             "libraries": rows,
+            "library_total": total,
             "fmt_seconds": fmt_seconds,
+            **history_page_size_context(limit),
+            **pagination,
         },
     )
 
@@ -872,8 +961,29 @@ def media_detail(item_id: str, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/users", response_class=HTMLResponse)
 def users(request: Request, db: Session = Depends(get_db)):
-    rows = db.query(AbsUser).order_by(AbsUser.username).all()
-    return templates.TemplateResponse(request, "users.html", {"rows": rows, "page": "users"})
+    limit = history_page_size(request)
+    total = db.query(AbsUser).count()
+    pagination = pagination_context(request, total, limit, "active users")
+    current_page = pagination["pagination"]["current_page"]
+    rows = (
+        db.query(AbsUser)
+        .order_by(AbsUser.username)
+        .offset(query_offset(current_page, limit))
+        .limit(limit)
+        .all()
+    )
+    summary_rows = db.query(AbsUser).order_by(AbsUser.username).limit(5).all()
+    return templates.TemplateResponse(
+        request,
+        "users.html",
+        {
+            "rows": rows,
+            "summary_rows": summary_rows,
+            "page": "users",
+            **history_page_size_context(limit),
+            **pagination,
+        },
+    )
 
 
 @router.get("/users/{user_key:path}", response_class=HTMLResponse)

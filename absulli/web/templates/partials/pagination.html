@@ -1,0 +1,28 @@
+{% if pagination %}
+  <div class="pagination-bar">
+    <div class="pagination-summary">
+      Showing {{ pagination.start }} to {{ pagination.end }} of {{ pagination.total }} {{ pagination.item_label }}
+    </div>
+    {% if pagination.total > 0 %}
+      <nav class="pagination-controls" aria-label="Pagination">
+        {% if pagination.previous_url %}
+          <a class="pagination-link" href="{{ pagination.previous_url }}">Prev</a>
+        {% endif %}
+        {% for page_number in pagination.pages %}
+          {% if page_number %}
+            {% if page_number == pagination.current_page %}
+              <span class="pagination-link active" aria-current="page">{{ page_number }}</span>
+            {% else %}
+              <a class="pagination-link" href="{{ pagination.path }}?limit={{ pagination.limit }}&page={{ page_number }}">{{ page_number }}</a>
+            {% endif %}
+          {% else %}
+            <span class="pagination-ellipsis">...</span>
+          {% endif %}
+        {% endfor %}
+        {% if pagination.next_url %}
+          <a class="pagination-link" href="{{ pagination.next_url }}">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </div>
+{% endif %}
