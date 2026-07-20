@@ -4,13 +4,6 @@
 <section class="hero">
   <div>
     <h1>Activity</h1>
-    <p id="live-activity-summary">
-      {% if active %}
-        {{ active|length }} active listening session{{ '' if active|length == 1 else 's' }}.
-      {% else %}
-        Nothing is currently being played.
-      {% endif %}
-    </p>
   </div>
 </section>
 
@@ -84,7 +77,7 @@
   <input type="hidden" name="recent_type" value="{{ recent_type }}">
   <input type="hidden" name="recent_limit" value="{{ recent_limit }}">
   <input class="tab-btn days-input" type="number" name="days" min="1" max="999" step="1" value="{{ stat_days }}" aria-label="Number of days for listen statistics">
-  <button class="tab-btn days-submit" type="submit">days</button>
+  <button class="tab-btn days-submit" type="submit">Days</button>
 </form>
 
 <section class="stats-grid">

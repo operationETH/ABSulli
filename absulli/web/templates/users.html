@@ -3,7 +3,6 @@
 <section class="hero">
   <div>
     <h1>Users</h1>
-    <p>Known Audiobookshelf users discovered from the API.</p>
   </div>
 </section>
 
@@ -15,7 +14,7 @@
       <h3>Known Users</h3>
       <table class="stat-table">
         <tbody>
-          {% for row in rows[:5] %}
+          {% for row in summary_rows %}
             <tr>
               <td class="rank">{{ loop.index }}</td>
               <td class="item-name" title="{{ row.display_name or row.username }}">
@@ -33,7 +32,7 @@
 </section>
 
 <section class="panel">
-  <div class="panel-head"><h2>User List</h2></div>
+  <div class="panel-head"><h2>User List</h2>{% include "partials/history_page_size.html" %}</div>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
@@ -53,5 +52,6 @@
       </tbody>
     </table>
   </div>
+  {% include "partials/pagination.html" %}
 </section>
 {% endblock %}

@@ -4,14 +4,16 @@
 <section class="hero">
   <div>
     <h1>Libraries</h1>
-    <p>{{ libraries|length }} synced Audiobookshelf librar{{ 'y' if libraries|length == 1 else 'ies' }}.</p>
   </div>
 </section>
 
 <section class="panel">
   <div class="panel-head">
     <h2>Library Overview</h2>
-    <a href="/">Back to dashboard</a>
+    <div class="panel-actions">
+      {% include "partials/history_page_size.html" %}
+      <a href="/">Back to dashboard</a>
+    </div>
   </div>
 
   <div class="table-wrap">
@@ -43,5 +45,6 @@
       </tbody>
     </table>
   </div>
+  {% include "partials/pagination.html" %}
 </section>
 {% endblock %}

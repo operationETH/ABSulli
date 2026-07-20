@@ -3,15 +3,11 @@
 {% block content %}
 <section class="panel graphs-panel">
   <div class="panel-head graph-page-head">
-    <div>
-      <h2>▥ Graphs</h2>
-      <p>Listening trends from imported Audiobookshelf history.</p>
-    </div>
+    <h2>Graphs</h2>
 
     <form class="graph-controls" method="get" action="/graphs">
       <label class="graph-select-wrap">
-        <span>User</span>
-        <select name="user" data-auto-submit>
+        <select name="user" aria-label="Graph user" data-auto-submit>
           <option value="all" {{ 'selected' if selected_user == 'all' else '' }}>All users</option>
           {% for user in users %}
             <option value="{{ user.username }}" {{ 'selected' if selected_user == user.username else '' }}>{{ user.display_name or user.username }}</option>
@@ -19,23 +15,17 @@
         </select>
       </label>
 
-      <div class="button-row graph-button-row">
+      <div class="button-row dashboard-button-row graph-button-row">
         <a class="tab-btn {{ 'active' if stat_metric == 'count' else '' }}" href="/graphs?metric=count&days={{ stat_days }}&user={{ selected_user }}">Play Count</a>
         <a class="tab-btn {{ 'active' if stat_metric == 'duration' else '' }}" href="/graphs?metric=duration&days={{ stat_days }}&user={{ selected_user }}">Play Duration</a>
         <span class="tab-btn tab-label">Last</span>
         <input type="hidden" name="metric" value="{{ stat_metric }}">
         <input class="tab-btn days-input" type="number" name="days" min="1" max="999" step="1" value="{{ stat_days }}" aria-label="Number of graph days">
-        <button class="tab-btn days-submit" type="submit">days</button>
+        <button class="tab-btn days-submit" type="submit">Days</button>
       </div>
     </form>
   </div>
 
-  <div class="graph-summary-strip">
-    <div><span>Sessions</span><strong>{{ graph_data.summary.sessions }}</strong></div>
-    <div><span>Listening time</span><strong>{{ graph_data.summary.duration }}</strong></div>
-    <div><span>Users</span><strong>{{ graph_data.summary.users }}</strong></div>
-    <div><span>Titles</span><strong>{{ graph_data.summary.titles }}</strong></div>
-  </div>
 </section>
 
 <script id="graphs-data" type="application/json" nonce="{{ request.state.absulli_csp_nonce | default('') }}">{{ graph_data.charts | tojson }}</script>
