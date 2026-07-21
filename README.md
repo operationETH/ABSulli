@@ -3,21 +3,11 @@
 <h3 align="center">A self-hosted companion dashboard for Audiobookshelf</h3>
 
 <p align="center">
-  <a href="https://github.com/operationETH/ABSulli/releases">
-    <img alt="Current Release" src="https://img.shields.io/github/v/release/operationETH/ABSulli">
-  </a>
-  <a href="https://github.com/operationETH/ABSulli/blob/main/LICENSE">
-    <img alt="License" src="https://img.shields.io/github/license/operationETH/ABSulli">
-  </a>
-  <a href="https://hub.docker.com/r/operationeth/absulli">
-    <img alt="Docker Hub Pulls" src="https://img.shields.io/docker/pulls/operationeth/absulli?label=Docker%20Hub%20pulls&logo=docker">
-  </a>
-  <a href="https://github.com/operationETH/ABSulli/pkgs/container/absulli">
-    <img alt="GHCR Pulls" src="https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/operationETH/ABSulli/absulli&query=downloadCount&label=GHCR%20pulls&logo=github&color=blue">
-  </a>
-  <a href="https://ca.unraid.net/apps/absulli-08kx2l31cthp3f">
-    <img alt="Unraid Community Apps" src="https://img.shields.io/badge/Unraid-Community%20Apps-F15A2C?logo=unraid&logoColor=white">
-  </a>
+  <a href="https://github.com/operationETH/ABSulli/releases"><img alt="Current Release" src="https://img.shields.io/github/v/release/operationETH/ABSulli"></a>
+  <a href="https://github.com/operationETH/ABSulli/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/operationETH/ABSulli"></a>
+  <a href="https://hub.docker.com/r/operationeth/absulli"><img alt="Docker Hub Pulls" src="https://img.shields.io/docker/pulls/operationeth/absulli?label=Docker%20Hub%20pulls&logo=docker"></a>
+  <a href="https://github.com/operationETH/ABSulli/pkgs/container/absulli"><img alt="GHCR Pulls" src="https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/operationETH/ABSulli/absulli&query=downloadCount&label=GHCR%20pulls&logo=github&color=blue"></a>
+  <a href="https://ca.unraid.net/apps/absulli-08kx2l31cthp3f"><img alt="Unraid Community Apps" src="https://img.shields.io/badge/Unraid-Community%20Apps-F15A2C?logo=unraid&logoColor=white"></a>
 </p>
 
 ---
