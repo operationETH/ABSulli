@@ -1,4 +1,26 @@
-# ABSulli
+<p align="center">
+<img alt="Logo Banner" src="https://raw.githubusercontent.com/operationETH/ABSulli/refs/heads/main/absulli/web/static/img/absulli-banner.svg?sanitize=true"/>
+<h3 align="center">A self-hosted companion dashboard for Audiobookshelf</h3>
+
+<p align="center">
+  <a href="https://github.com/operationETH/ABSulli/releases">
+    <img alt="Current Release" src="https://img.shields.io/github/v/release/operationETH/ABSulli">
+  </a>
+  <a href="https://github.com/operationETH/ABSulli/blob/main/LICENSE">
+    <img alt="License" src="https://img.shields.io/github/license/operationETH/ABSulli">
+  </a>
+  <a href="https://hub.docker.com/r/operationeth/absulli">
+    <img alt="Docker Hub Pulls" src="https://img.shields.io/docker/pulls/operationeth/absulli?label=Docker%20Hub%20pulls&logo=docker">
+  </a>
+  <a href="https://github.com/operationETH/ABSulli/pkgs/container/absulli">
+    <img alt="GHCR Pulls" src="https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/operationETH/ABSulli/absulli&query=downloadCount&label=GHCR%20pulls&logo=github&color=blue">
+  </a>
+  <a href="https://ca.unraid.net/apps/absulli-08kx2l31cthp3f">
+    <img alt="Unraid Community Apps" src="https://img.shields.io/badge/Unraid-Community%20Apps-F15A2C?logo=unraid&logoColor=white">
+  </a>
+</p>
+
+---
 
 > [!NOTE]
 > AI assistance was used during development of this project. The code has been reviewed and tested to the best of my ability, but ABSulli is still under active development. Users should review and validate it for their own environment before relying on it. If you find a bug, please open an [issue](https://github.com/operationETH/ABSulli/issues).
@@ -167,6 +189,3 @@ Authentication is required after setup and recommended for all installs.
 
 ---
 
-## License
-
-GPL-3.0 License
