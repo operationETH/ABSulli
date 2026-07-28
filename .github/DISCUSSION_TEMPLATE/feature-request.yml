@@ -16,7 +16,11 @@ body:
       multiple: true
       options:
         - API
-        - UI Feature
+        - Dashboard & Statistics
+        - History, Users & Libraries
+        - Notifications
+        - Docker & Deployment
+        - UI / UX
         - Other
     validations:
       required: true
