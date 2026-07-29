@@ -72,7 +72,7 @@ jobs:
       - name: Set app version
         id: version
         shell: bash
-        run: echo "version=nightly-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: echo "version=0.0.0.dev0+nightly.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata
         id: meta
