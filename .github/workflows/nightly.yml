@@ -1,18 +1,32 @@
-name: Build ABSulli Image
+name: Build ABSulli Nightly Image
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches:
+      - nightly
+    paths:
+      - "absulli/**"
+      - "alembic/**"
+      - "alembic.ini"
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".dockerignore"
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: absulli-nightly
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -20,7 +34,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.14'
+          python-version: "3.14"
 
       - name: Install dependencies
         run: |
@@ -34,6 +48,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: test
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -48,32 +63,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
         with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set app version
         id: version
         shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0.dev0" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "version=nightly-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ghcr.io/operationeth/absulli
+            operationeth/absulli
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=nightly
+            type=sha
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             ABSULLI_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
