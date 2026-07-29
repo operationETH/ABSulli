@@ -1,7 +1,7 @@
 from datetime import timedelta
 import logging
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
@@ -75,6 +75,8 @@ from absulli.web.queries import (
     user_display_name,
     user_initial,
     resolve_user,
+    user_history_count,
+    user_history_filter,
     user_history_rows,
     user_window_stats,
     user_player_stats,
@@ -155,8 +157,11 @@ def pagination_pages(current_page: int, total_pages: int) -> list[int | None]:
     return result
 
 
-def pagination_url(path: str, page: int, limit: int) -> str:
-    return f"{path}?limit={limit}&page={page}"
+def pagination_url(request: Request, path: str, page: int, limit: int) -> str:
+    params = dict(request.query_params)
+    params["limit"] = str(limit)
+    params["page"] = str(page)
+    return f"{path}?{urlencode(params)}"
 
 
 def pagination_context(request: Request, total: int, limit: int, item_label: str) -> dict[str, object]:
@@ -176,8 +181,13 @@ def pagination_context(request: Request, total: int, limit: int, item_label: str
             "limit": limit,
             "item_label": item_label,
             "pages": pagination_pages(current_page, total_pages) if total else [],
-            "previous_url": pagination_url(path, current_page - 1, limit) if current_page > 1 else "",
-            "next_url": pagination_url(path, current_page + 1, limit) if current_page < total_pages else "",
+            "page_urls": {
+                page: pagination_url(request, path, page, limit)
+                for page in pagination_pages(current_page, total_pages)
+                if page is not None
+            } if total else {},
+            "previous_url": pagination_url(request, path, current_page - 1, limit) if current_page > 1 else "",
+            "next_url": pagination_url(request, path, current_page + 1, limit) if current_page < total_pages else "",
             "path": path,
         }
     }
@@ -752,21 +762,30 @@ def activity(request: Request, db: Session = Depends(get_db)):
 @router.get("/history", response_class=HTMLResponse)
 def history(request: Request, db: Session = Depends(get_db)):
     limit = history_page_size(request)
-    total = db.query(ListeningHistory).count()
+    selected_user_key = (request.query_params.get("user") or "").strip()
+    selected_user = resolve_user(db, selected_user_key) if selected_user_key else None
+    history_query = db.query(ListeningHistory)
+    if selected_user_key:
+        history_query = history_query.filter(user_history_filter(selected_user, selected_user_key))
+    total = history_query.count()
     pagination = pagination_context(request, total, limit, "history entries")
     current_page = pagination["pagination"]["current_page"]
     rows = (
-        db.query(ListeningHistory)
+        history_query
         .order_by(desc(media_history_date()))
         .offset(query_offset(current_page, limit))
         .limit(limit)
         .all()
     )
+    user_options = db.query(AbsUser).order_by(func.lower(func.coalesce(AbsUser.display_name, AbsUser.username)), AbsUser.username).all()
     context = {
         "rows": rows,
         "page": "history",
         "fmt_seconds": fmt_seconds,
         "history_user_url": history_user_url,
+        "user_options": user_options,
+        "selected_user_key": selected_user_key,
+        "history_page_size_hidden_params": [("user", selected_user_key)] if selected_user_key else [],
     }
     context.update(history_page_size_context(limit))
     context.update(pagination)
@@ -991,9 +1010,27 @@ def user_detail(user_key: str, request: Request, db: Session = Depends(get_db)):
     user_key = user_key.strip()
     user = resolve_user(db, user_key)
     limit = history_page_size(request)
-    rows = user_history_rows(db, user, user_key, limit=limit)
-    if not user and not rows:
+    total = user_history_count(db, user, user_key)
+    if not user and not total:
         raise HTTPException(status_code=404, detail="User not found")
+    pagination = pagination_context(request, total, limit, "history entries")
+    pagination_data = pagination["pagination"]
+    pagination_data["page_urls"] = {
+        page: f"{url}#history"
+        for page, url in pagination_data["page_urls"].items()
+    }
+    if pagination_data["previous_url"]:
+        pagination_data["previous_url"] = f"{pagination_data['previous_url']}#history"
+    if pagination_data["next_url"]:
+        pagination_data["next_url"] = f"{pagination_data['next_url']}#history"
+    current_page = pagination_data["current_page"]
+    rows = user_history_rows(
+        db,
+        user,
+        user_key,
+        limit=limit,
+        offset=query_offset(current_page, limit),
+    )
 
     display_name = user_display_name(user, user_key)
     return templates.TemplateResponse(
@@ -1006,7 +1043,10 @@ def user_detail(user_key: str, request: Request, db: Session = Depends(get_db)):
             "display_name": display_name,
             "initial": user_initial(display_name),
             "rows": rows,
+            "global_history_url": f"/history?{urlencode({'user': user.abs_user_id if user and user.abs_user_id else user_key})}",
+            "history_page_size_action": f"{request.url.path}#history",
             **history_page_size_context(limit),
+            **pagination,
             "window_stats": user_window_stats(db, user, user_key),
             "player_stats": user_player_stats(db, user, user_key),
             "library_stats": user_library_stats(db, user, user_key),

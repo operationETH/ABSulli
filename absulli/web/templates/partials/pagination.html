@@ -13,7 +13,7 @@
             {% if page_number == pagination.current_page %}
               <span class="pagination-link active" aria-current="page">{{ page_number }}</span>
             {% else %}
-              <a class="pagination-link" href="{{ pagination.path }}?limit={{ pagination.limit }}&page={{ page_number }}">{{ page_number }}</a>
+              <a class="pagination-link" href="{{ pagination.page_urls[page_number] }}">{{ page_number }}</a>
             {% endif %}
           {% else %}
             <span class="pagination-ellipsis">...</span>

@@ -623,8 +623,20 @@ def user_history_filter(user: AbsUser | None, user_key: str):
     return ListeningHistory.username.in_([name for name in names if name])
 
 
-def user_history_rows(db: Session, user: AbsUser | None, user_key: str, limit: int | None = None) -> list[ListeningHistory]:
+def user_history_count(db: Session, user: AbsUser | None, user_key: str) -> int:
+    return db.query(ListeningHistory).filter(user_history_filter(user, user_key)).count()
+
+
+def user_history_rows(
+    db: Session,
+    user: AbsUser | None,
+    user_key: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[ListeningHistory]:
     query = db.query(ListeningHistory).filter(user_history_filter(user, user_key)).order_by(desc(media_history_date()))
+    if offset:
+        query = query.offset(max(int(offset), 0))
     if limit is not None:
         query = query.limit(limit)
     return query.all()
