@@ -4,7 +4,7 @@ from urllib.parse import quote
 from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
-from absulli.core.time import utcnow
+from absulli.core.time import format_local_month_day, utcnow
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem
 
 
@@ -228,7 +228,7 @@ def build_home_cards(db: Session, metric: str = "count", days: int = 30):
     )
 
     def date_value(dt):
-        return dt.strftime("%m/%d") if dt else "–"
+        return format_local_month_day(dt) or "–"
 
     played_items = top_rows(top_titles, stat_formatter, include_item_id=True)
     popular_items = top_rows(popular_titles, include_item_id=True)
