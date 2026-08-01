@@ -90,6 +90,7 @@ from absulli.web.queries import (
 )
 from absulli.web.graphs import build_graphs, clean_graph_user
 from absulli.web.templating import templates
+from absulli.web.update_check import update_status
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -1206,7 +1207,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
                 {"label": "ABSulli API Token", "value": "Configured" if settings.effective_api_token else "Not configured"},
             ],
             "user_fields": user_settings_context_fields(settings),
-            "about_settings": about_settings_context(settings, db),
+            "about_settings": about_settings_context(settings, db, update_status(settings, __version__)),
             "about_data": about_data_context(db),
             "general_fields": general_settings_context(settings),
             "network_fields": network_settings_context(settings),

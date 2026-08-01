@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from urllib.parse import quote
 
@@ -297,14 +298,22 @@ def alembic_version(db: Session) -> str:
     return str(version or "Unavailable")
 
 
-def about_settings_context(settings, db: Session) -> list[dict[str, object]]:
+def about_settings_context(settings, db: Session, version_status: dict[str, object] | None = None) -> list[dict[str, object]]:
+    version_status = version_status or {}
     return [
-        {"label": "ABSulli Version", "value": f"v{__version__}"},
+        {
+            "label": "ABSulli Version",
+            "value": str(version_status.get("current_version") or f"v{__version__}"),
+            "status_label": str(version_status.get("badge_label") or "Unknown"),
+            "status_class": str(version_status.get("badge_class") or "unknown"),
+            "status_url": str(version_status.get("release_url") or "") if version_status.get("channel") in {"stable", "nightly"} else "",
+        },
         {"label": "Data Directory", "value": str(settings.data_dir)},
         {"label": "Database Path", "value": str(settings.data_dir / "absulli.db")},
         {"label": "Database Size", "value": database_file_size(settings)},
         {"label": "Migration Version", "value": alembic_version(db)},
         {"label": "Python Version", "value": sys.version.split()[0]},
+        {"label": "Time Zone", "value": os.environ.get("TZ", "").strip() or "Not configured"},
     ]
 
 

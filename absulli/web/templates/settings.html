@@ -304,7 +304,19 @@
   </div>
   <div class="settings-grid readable-settings-grid">
     {% for item in about_settings %}
-    <div class="settings-item"><strong>{{ item.label }}</strong><span>{{ item.value }}</span></div>
+    <div class="settings-item{% if item.status_label %} about-version-item{% endif %}">
+      <strong>{{ item.label }}</strong>
+      <span class="settings-item-value">
+        <span>{{ item.value }}</span>
+        {% if item.status_label %}
+          {% if item.status_url %}
+          <a class="version-status-badge {{ item.status_class }}" href="{{ item.status_url }}" target="_blank" rel="noopener noreferrer">{{ item.status_label }}</a>
+          {% else %}
+          <span class="version-status-badge {{ item.status_class }}">{{ item.status_label }}</span>
+          {% endif %}
+        {% endif %}
+      </span>
+    </div>
     {% endfor %}
   </div>
 </section>
