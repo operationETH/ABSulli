@@ -57,9 +57,7 @@ def test_current_nightly_has_no_update_warning(tmp_path, monkeypatch):
     assert status["current_version"] == "sha-4c94cb2"
     assert status["latest_version"] == "sha-4c94cb2"
     assert status["badge_label"] == "Nightly"
-    assert status["release_url"] == (
-        "https://github.com/operationETH/ABSulli/commit/4c94cb2abcdef1234567890"
-    )
+    assert status["release_url"] == update_check.NIGHTLY_COMMITS_URL
     assert status["update_available"] is False
 
 
@@ -83,10 +81,8 @@ def test_old_nightly_shows_new_nightly_build(tmp_path, monkeypatch):
     assert status["latest_version"] == "sha-abcdef1"
     assert status["badge_label"] == "Nightly Update Available"
     assert status["badge_class"] == "outdated"
-    assert status["header_label"] == "New nightly build"
-    assert status["release_url"] == (
-        "https://github.com/operationETH/ABSulli/compare/4c94cb2...abcdef1"
-    )
+    assert status["header_label"] == "Nightly Update Available"
+    assert status["release_url"] == update_check.NIGHTLY_COMMITS_URL
     assert status["update_available"] is True
 
 
@@ -110,9 +106,7 @@ def test_newer_installed_nightly_ignores_stale_older_result(tmp_path, monkeypatc
     assert status["latest_version"] == "sha-097e06b"
     assert status["badge_label"] == "Nightly"
     assert status["badge_class"] == "nightly"
-    assert status["release_url"] == (
-        "https://github.com/operationETH/ABSulli/commit/097e06b"
-    )
+    assert status["release_url"] == update_check.NIGHTLY_COMMITS_URL
     assert status["update_available"] is False
 
 

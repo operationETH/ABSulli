@@ -96,13 +96,13 @@ def test_about_current_version_badges_remain_clickable():
                 "current_version": "sha-3442c21",
                 "badge_label": "Nightly",
                 "badge_class": "nightly",
-                "release_url": "https://github.com/operationETH/ABSulli/commit/3442c21",
+                "release_url": "https://github.com/operationETH/ABSulli/commits/nightly",
                 "update_available": False,
             },
         )
 
     assert stable_rows[0]["status_url"] == "https://github.com/operationETH/ABSulli/releases"
-    assert nightly_rows[0]["status_url"] == "https://github.com/operationETH/ABSulli/commit/3442c21"
+    assert nightly_rows[0]["status_url"] == "https://github.com/operationETH/ABSulli/commits/nightly"
 
 
 def test_about_time_zone_uses_configured_tz(monkeypatch):

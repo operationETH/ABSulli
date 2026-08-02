@@ -11,6 +11,7 @@ LATEST_NIGHTLY_RUN_API_URL = "https://api.github.com/repos/operationETH/ABSulli/
 REPOSITORY_URL = "https://github.com/operationETH/ABSulli"
 RELEASES_URL = f"{REPOSITORY_URL}/releases"
 NIGHTLY_WORKFLOW_URL = "https://github.com/operationETH/ABSulli/actions/workflows/nightly.yml"
+NIGHTLY_COMMITS_URL = f"{REPOSITORY_URL}/commits/nightly"
 COMPARE_API_URL = "https://api.github.com/repos/operationETH/ABSulli/compare/{base}...{head}"
 CACHE_TTL_SECONDS = 21600
 FAILURE_CACHE_SECONDS = 900
@@ -241,26 +242,23 @@ def update_status(settings, current_version: str) -> dict[str, object]:
 
     if channel == "nightly":
         nightly = _latest_nightly(settings.data_dir)
-        status["release_url"] = str(nightly.get("url") or NIGHTLY_WORKFLOW_URL)
+        status["release_url"] = NIGHTLY_COMMITS_URL
         current_sha = _nightly_sha(current_version)
         latest_sha = str(nightly.get("sha") or "").strip().lower()
         if not nightly.get("available") or not current_sha or not latest_sha:
             return status
         status["latest_version"] = f"sha-{latest_sha[:7]}"
-        status["release_url"] = f"{REPOSITORY_URL}/commit/{latest_sha}"
+        status["release_url"] = NIGHTLY_COMMITS_URL
         if current_sha[:7] != latest_sha[:7]:
             comparison = _commit_comparison(current_sha, latest_sha)
             if comparison == "ahead":
                 status["badge_label"] = "Nightly Update Available"
                 status["badge_class"] = "outdated"
-                status["header_label"] = "New nightly build"
-                status["release_url"] = (
-                    f"{REPOSITORY_URL}/compare/{current_sha[:7]}...{latest_sha[:7]}"
-                )
+                status["header_label"] = "Nightly Update Available"
                 status["update_available"] = True
             else:
                 status["latest_version"] = current_display
-                status["release_url"] = f"{REPOSITORY_URL}/commit/{current_sha}"
+                status["release_url"] = NIGHTLY_COMMITS_URL
         return status
 
     release = _latest_release(settings.data_dir)
