@@ -847,8 +847,39 @@ def library_detail(library_id: str, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Library not found")
 
     limit = history_page_size(request)
+    selected_user_key = (request.query_params.get("user") or "").strip()
+    selected_user = resolve_user(db, selected_user_key) if selected_user_key else None
+    library_filter = or_(
+        ListeningHistory.library_id == library.abs_library_id,
+        ListeningHistory.library_name == library.name,
+    )
+    history_query = db.query(ListeningHistory).filter(library_filter)
+    if selected_user_key:
+        history_query = history_query.filter(user_history_filter(selected_user, selected_user_key))
+    total = history_query.count()
+    pagination = pagination_context(request, total, limit, "history entries")
+    pagination_data = pagination["pagination"]
+    pagination_data["page_urls"] = {
+        page: f"{url}#history"
+        for page, url in pagination_data["page_urls"].items()
+    }
+    if pagination_data["previous_url"]:
+        pagination_data["previous_url"] = f"{pagination_data['previous_url']}#history"
+    if pagination_data["next_url"]:
+        pagination_data["next_url"] = f"{pagination_data['next_url']}#history"
+    current_page = pagination_data["current_page"]
+    rows = (
+        history_query
+        .order_by(desc(media_history_date()))
+        .offset(query_offset(current_page, limit))
+        .limit(limit)
+        .all()
+    )
+    user_options = db.query(AbsUser).order_by(
+        func.lower(func.coalesce(AbsUser.display_name, AbsUser.username)),
+        AbsUser.username,
+    ).all()
     items = library_items(db, library.abs_library_id, limit=60)
-    rows = library_history_rows(db, library, limit=limit)
     item_count = max(int(library.item_count or 0), db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).count())
 
     return templates.TemplateResponse(
@@ -862,7 +893,12 @@ def library_detail(library_id: str, request: Request, db: Session = Depends(get_
             "items": items,
             "rows": rows,
             "history_user_url": history_user_url,
+            "user_options": user_options,
+            "selected_user_key": selected_user_key,
+            "history_page_size_action": f"{request.url.path}#history",
+            "history_page_size_hidden_params": [("user", selected_user_key)] if selected_user_key else [],
             **history_page_size_context(limit),
+            **pagination,
             "recently_played": library_recently_played_items(db, library),
             "top_items": library_top_items(db, library),
             "window_stats": library_window_stats(db, library),

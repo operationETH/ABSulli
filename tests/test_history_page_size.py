@@ -186,3 +186,58 @@ def test_user_detail_view_all_history_links_to_selected_global_user(monkeypatch)
 
     assert response.status_code == 200
     assert 'href="/history?user=user-1">View all history</a>' in response.text
+
+
+def test_library_detail_history_paginates_with_existing_controls(monkeypatch):
+    client, db, store = make_client(monkeypatch)
+    add_history_rows(db, count=24)
+
+    response = client.get("/libraries/lib-1?limit=10&page=2")
+
+    assert response.status_code == 200
+    history_section = response.text.split('<section class="panel media-history-panel" id="history">', 1)[1]
+    assert "Book 013" in history_section
+    assert "Book 004" in history_section
+    assert "Book 014" not in history_section
+    assert "Book 003" not in history_section
+    assert "Showing 11 to 20 of 24 history entries" in response.text
+    assert 'href="/libraries/lib-1?limit=10&amp;page=1#history"' in response.text
+    assert 'href="/libraries/lib-1?limit=10&amp;page=3#history"' in response.text
+    assert 'aria-current="page">2</span>' in response.text
+    assert 'action="/libraries/lib-1#history"' in response.text
+
+
+def test_library_detail_can_filter_history_by_user_and_preserve_filter(monkeypatch):
+    client, db, store = make_client(monkeypatch)
+    add_history_rows(db, count=12, username="admin", user_id="user-1")
+    db.add(AbsUser(abs_user_id="user-2", username="david", display_name="David"))
+    base = datetime(2026, 2, 1, 12, 0, 0)
+    for index in range(3):
+        db.add(
+            ListeningHistory(
+                abs_session_id=f"david-session-{index}",
+                abs_user_id="user-2",
+                username="david",
+                abs_item_id="item-1",
+                title=f"David Book {index}",
+                media_type="book",
+                library_id="lib-1",
+                library_name="Audiobooks",
+                imported_at=base + timedelta(minutes=index),
+                started_at=base + timedelta(minutes=index),
+                duration_seconds=60,
+            )
+        )
+    db.commit()
+
+    response = client.get("/libraries/lib-1?user=user-1&limit=10&page=1")
+
+    assert response.status_code == 200
+    history_section = response.text.split('<section class="panel media-history-panel" id="history">', 1)[1]
+    assert "Book 011" in history_section
+    assert "David Book" not in history_section
+    assert "Showing 1 to 10 of 12 history entries" in response.text
+    assert '<option value="user-1" selected>Admin</option>' in response.text
+    assert '<option value="user-2" >David</option>' in response.text
+    assert 'name="user" value="user-1"' in response.text
+    assert 'href="/libraries/lib-1?user=user-1&amp;limit=10&amp;page=2#history"' in response.text

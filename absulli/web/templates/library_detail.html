@@ -180,6 +180,17 @@
   <div class="panel-head">
     <h2>Listen History for {{ library.name }}</h2>
     <div class="panel-actions">
+      <form class="history-page-size" method="get" action="{{ request.url.path }}#history">
+        <label for="library-history-user-filter">User</label>
+        <select id="library-history-user-filter" name="user" data-auto-submit>
+          <option value="">All users</option>
+          {% for option in user_options %}
+            {% set option_key = option.abs_user_id or option.username %}
+            <option value="{{ option_key }}" {% if option_key == selected_user_key %}selected{% endif %}>{{ option.display_name or option.username }}</option>
+          {% endfor %}
+        </select>
+        <input type="hidden" name="limit" value="{{ history_page_size }}">
+      </form>
       {% include "partials/history_page_size.html" %}
       <a href="/history">View all history</a>
     </div>
@@ -235,5 +246,6 @@
       </tbody>
     </table>
   </div>
+  {% include "partials/pagination.html" %}
 </section>
 {% endblock %}
