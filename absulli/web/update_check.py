@@ -11,6 +11,7 @@ LATEST_NIGHTLY_RUN_API_URL = "https://api.github.com/repos/operationETH/ABSulli/
 REPOSITORY_URL = "https://github.com/operationETH/ABSulli"
 RELEASES_URL = f"{REPOSITORY_URL}/releases"
 NIGHTLY_WORKFLOW_URL = "https://github.com/operationETH/ABSulli/actions/workflows/nightly.yml"
+COMPARE_API_URL = "https://api.github.com/repos/operationETH/ABSulli/compare/{base}...{head}"
 CACHE_TTL_SECONDS = 21600
 FAILURE_CACHE_SECONDS = 900
 
@@ -19,6 +20,7 @@ _memory_release: dict[str, object] | None = None
 _memory_release_expires_at = 0.0
 _memory_nightly: dict[str, object] | None = None
 _memory_nightly_expires_at = 0.0
+_memory_comparisons: dict[tuple[str, str], tuple[str, float]] = {}
 
 
 def _stable_version(value: str) -> tuple[int, int, int] | None:
@@ -127,6 +129,37 @@ def _fetch_latest_nightly_run() -> dict[str, object]:
     }
 
 
+def _fetch_commit_comparison(base: str, head: str) -> str:
+    with _github_client() as client:
+        response = client.get(COMPARE_API_URL.format(base=base, head=head))
+        response.raise_for_status()
+        payload = response.json()
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {"ahead", "behind", "diverged", "identical"}:
+        raise ValueError("Commit comparison did not include a valid status")
+    return status
+
+
+def _commit_comparison(base: str, head: str) -> str:
+    key = (base.lower(), head.lower())
+    now = time.time()
+    with _cache_lock:
+        cached = _memory_comparisons.get(key)
+        if cached and cached[1] > now:
+            return cached[0]
+
+    try:
+        status = _fetch_commit_comparison(base, head)
+        ttl = CACHE_TTL_SECONDS
+    except Exception:
+        status = "unknown"
+        ttl = FAILURE_CACHE_SECONDS
+
+    with _cache_lock:
+        _memory_comparisons[key] = (status, now + ttl)
+    return status
+
+
 def _latest_release(data_dir: Path) -> dict[str, object]:
     global _memory_release, _memory_release_expires_at
 
@@ -216,13 +249,18 @@ def update_status(settings, current_version: str) -> dict[str, object]:
         status["latest_version"] = f"sha-{latest_sha[:7]}"
         status["release_url"] = f"{REPOSITORY_URL}/commit/{latest_sha}"
         if current_sha[:7] != latest_sha[:7]:
-            status["badge_label"] = "Nightly Update Available"
-            status["badge_class"] = "outdated"
-            status["header_label"] = "New nightly build"
-            status["release_url"] = (
-                f"{REPOSITORY_URL}/compare/{current_sha[:7]}...{latest_sha[:7]}"
-            )
-            status["update_available"] = True
+            comparison = _commit_comparison(current_sha, latest_sha)
+            if comparison == "ahead":
+                status["badge_label"] = "Nightly Update Available"
+                status["badge_class"] = "outdated"
+                status["header_label"] = "New nightly build"
+                status["release_url"] = (
+                    f"{REPOSITORY_URL}/compare/{current_sha[:7]}...{latest_sha[:7]}"
+                )
+                status["update_available"] = True
+            else:
+                status["latest_version"] = current_display
+                status["release_url"] = f"{REPOSITORY_URL}/commit/{current_sha}"
         return status
 
     release = _latest_release(settings.data_dir)
@@ -251,3 +289,4 @@ def reset_update_cache() -> None:
         _memory_release_expires_at = 0.0
         _memory_nightly = None
         _memory_nightly_expires_at = 0.0
+        _memory_comparisons.clear()

@@ -70,6 +70,11 @@ def test_old_nightly_shows_new_nightly_build(tmp_path, monkeypatch):
         "_fetch_latest_nightly_run",
         lambda: {"sha": "abcdef1234567890", "url": "https://example.com/nightly", "available": True},
     )
+    monkeypatch.setattr(
+        update_check,
+        "_fetch_commit_comparison",
+        lambda base, head: "ahead",
+    )
 
     status = update_check.update_status(Settings(tmp_path), "0.0.0.dev0+nightly.4c94cb2")
 
@@ -83,6 +88,32 @@ def test_old_nightly_shows_new_nightly_build(tmp_path, monkeypatch):
         "https://github.com/operationETH/ABSulli/compare/4c94cb2...abcdef1"
     )
     assert status["update_available"] is True
+
+
+def test_newer_installed_nightly_ignores_stale_older_result(tmp_path, monkeypatch):
+    update_check.reset_update_cache()
+    monkeypatch.setattr(
+        update_check,
+        "_fetch_latest_nightly_run",
+        lambda: {"sha": "e0e9ea5abcdef1234567890", "url": "https://example.com/nightly", "available": True},
+    )
+    monkeypatch.setattr(
+        update_check,
+        "_fetch_commit_comparison",
+        lambda base, head: "behind",
+    )
+
+    status = update_check.update_status(Settings(tmp_path), "0.0.0.dev0+nightly.097e06b")
+
+    assert status["channel"] == "nightly"
+    assert status["current_version"] == "sha-097e06b"
+    assert status["latest_version"] == "sha-097e06b"
+    assert status["badge_label"] == "Nightly"
+    assert status["badge_class"] == "nightly"
+    assert status["release_url"] == (
+        "https://github.com/operationETH/ABSulli/commit/097e06b"
+    )
+    assert status["update_available"] is False
 
 
 def test_development_build_never_shows_update_warning(tmp_path, monkeypatch):
