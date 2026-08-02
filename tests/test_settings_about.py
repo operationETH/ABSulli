@@ -5,7 +5,7 @@ from absulli.core.config import get_settings
 from absulli.database.models import AbsUser, Library, ListeningHistory, MediaItem, NotificationEvent
 from absulli.database.session import SessionLocal
 from absulli.web.routes import router as web_router
-from absulli.web.settings import compact_bytes
+from absulli.web.settings import about_settings_context, compact_bytes
 
 
 def make_client(monkeypatch):
@@ -43,7 +43,85 @@ def test_about_settings_tab_renders_storage_and_data_summary(monkeypatch):
     assert "Database Size" in response.text
     assert "Migration Version" in response.text
     assert "Python Version" in response.text
+    assert "Time Zone" in response.text
     assert "Listening History Rows" in response.text
     assert "Notification Events" in response.text
     assert "Python Package" not in response.text
     assert "Migrations" not in response.text
+
+
+def test_about_version_context_includes_status_badge(monkeypatch):
+    settings = get_settings()
+    with SessionLocal() as db:
+        rows = about_settings_context(
+            settings,
+            db,
+            {
+                "channel": "stable",
+                "current_version": "v0.2.11",
+                "badge_label": "Out of Date",
+                "badge_class": "outdated",
+                "release_url": "https://github.com/operationETH/ABSulli/releases",
+                "update_available": True,
+            },
+        )
+
+    assert rows[0]["label"] == "ABSulli Version"
+    assert rows[0]["value"] == "v0.2.11"
+    assert rows[0]["status_label"] == "Out of Date"
+    assert rows[0]["status_class"] == "outdated"
+    assert rows[0]["status_url"] == "https://github.com/operationETH/ABSulli/releases"
+
+
+def test_about_current_version_badges_remain_clickable():
+    settings = get_settings()
+    with SessionLocal() as db:
+        stable_rows = about_settings_context(
+            settings,
+            db,
+            {
+                "channel": "stable",
+                "current_version": "v0.2.10",
+                "badge_label": "Up to Date",
+                "badge_class": "current",
+                "release_url": "https://github.com/operationETH/ABSulli/releases",
+                "update_available": False,
+            },
+        )
+        nightly_rows = about_settings_context(
+            settings,
+            db,
+            {
+                "channel": "nightly",
+                "current_version": "sha-3442c21",
+                "badge_label": "Nightly",
+                "badge_class": "nightly",
+                "release_url": "https://github.com/operationETH/ABSulli/commits/nightly",
+                "update_available": False,
+            },
+        )
+
+    assert stable_rows[0]["status_url"] == "https://github.com/operationETH/ABSulli/releases"
+    assert nightly_rows[0]["status_url"] == "https://github.com/operationETH/ABSulli/commits/nightly"
+
+
+def test_about_time_zone_uses_configured_tz(monkeypatch):
+    monkeypatch.setenv("TZ", "America/Phoenix")
+    settings = get_settings()
+
+    with SessionLocal() as db:
+        rows = about_settings_context(settings, db)
+
+    time_zone = next(row for row in rows if row["label"] == "Time Zone")
+    assert time_zone["value"] == "America/Phoenix"
+
+
+def test_about_time_zone_shows_not_configured(monkeypatch):
+    monkeypatch.delenv("TZ", raising=False)
+    settings = get_settings()
+
+    with SessionLocal() as db:
+        rows = about_settings_context(settings, db)
+
+    time_zone = next(row for row in rows if row["label"] == "Time Zone")
+    assert time_zone["value"] == "Not configured"

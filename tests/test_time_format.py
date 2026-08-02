@@ -1,6 +1,11 @@
 from datetime import datetime
 
-from absulli.core.time import format_local_date, format_local_datetime, format_local_time
+from absulli.core.time import (
+    format_local_date,
+    format_local_datetime,
+    format_local_month_day,
+    format_local_time,
+)
 
 
 def test_format_local_datetime_uses_tz_env(monkeypatch):
@@ -17,3 +22,9 @@ def test_format_local_datetime_falls_back_to_utc_for_bad_tz(monkeypatch):
     monkeypatch.setenv("TZ", "Not/AZone")
 
     assert format_local_datetime(datetime(2026, 6, 10, 20, 52, 36)) == "2026-06-10 8:52 PM"
+
+
+def test_format_local_month_day_uses_tz_env(monkeypatch):
+    monkeypatch.setenv("TZ", "America/Phoenix")
+
+    assert format_local_month_day(datetime(2026, 7, 30, 1, 0)) == "07/29"

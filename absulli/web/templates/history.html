@@ -10,7 +10,20 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Global Listening History</h2>
-    {% include "partials/history_page_size.html" %}
+    <div class="panel-actions">
+      <form class="history-page-size" method="get">
+        <label for="history-user-filter">User</label>
+        <select id="history-user-filter" name="user" data-auto-submit>
+          <option value="">All users</option>
+          {% for option in user_options %}
+            {% set option_key = option.abs_user_id or option.username %}
+            <option value="{{ option_key }}" {% if option_key == selected_user_key %}selected{% endif %}>{{ option.display_name or option.username }}</option>
+          {% endfor %}
+        </select>
+        <input type="hidden" name="limit" value="{{ history_page_size }}">
+      </form>
+      {% include "partials/history_page_size.html" %}
+    </div>
   </div>
 
   <div class="table-wrap">

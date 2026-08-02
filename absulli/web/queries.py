@@ -4,7 +4,7 @@ from urllib.parse import quote
 from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
-from absulli.core.time import utcnow
+from absulli.core.time import format_local_month_day, utcnow
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem
 
 
@@ -228,7 +228,7 @@ def build_home_cards(db: Session, metric: str = "count", days: int = 30):
     )
 
     def date_value(dt):
-        return dt.strftime("%m/%d") if dt else "–"
+        return format_local_month_day(dt) or "–"
 
     played_items = top_rows(top_titles, stat_formatter, include_item_id=True)
     popular_items = top_rows(popular_titles, include_item_id=True)
@@ -623,8 +623,20 @@ def user_history_filter(user: AbsUser | None, user_key: str):
     return ListeningHistory.username.in_([name for name in names if name])
 
 
-def user_history_rows(db: Session, user: AbsUser | None, user_key: str, limit: int | None = None) -> list[ListeningHistory]:
+def user_history_count(db: Session, user: AbsUser | None, user_key: str) -> int:
+    return db.query(ListeningHistory).filter(user_history_filter(user, user_key)).count()
+
+
+def user_history_rows(
+    db: Session,
+    user: AbsUser | None,
+    user_key: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[ListeningHistory]:
     query = db.query(ListeningHistory).filter(user_history_filter(user, user_key)).order_by(desc(media_history_date()))
+    if offset:
+        query = query.offset(max(int(offset), 0))
     if limit is not None:
         query = query.limit(limit)
     return query.all()

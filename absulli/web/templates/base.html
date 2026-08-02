@@ -10,10 +10,15 @@
 </head>
 <body>
   <header class="abs-topbar">
-    <a class="abs-brand" href="/" aria-label="ABSulli Home">
-      <img class="abs-logo-icon" src="/static/img/logo-mark.svg?v=2" alt="" aria-hidden="true">
-      <strong>ABS<span>ULLI</span></strong>
-    </a>
+    <div class="abs-brand-wrap{% if update_status.update_available %} has-update{% endif %}">
+      <a class="abs-brand" href="/" aria-label="ABSulli Home">
+        <img class="abs-logo-icon" src="/static/img/logo-mark.svg?v=2" alt="" aria-hidden="true">
+        <strong>ABS<span>ULLI</span></strong>
+      </a>
+      {% if update_status.update_available %}
+      <a class="header-update-badge" href="/settings?tab=about">{{ update_status.header_label }}</a>
+      {% endif %}
+    </div>
     <form class="search-shell" role="search" action="/search" method="get">
       <span>⌕</span><input aria-label="Search" name="q" value="{{ search_query | default('') }}" placeholder="Search history, users, titles..." autocomplete="off">
     </form>

@@ -1,4 +1,7 @@
-<form class="history-page-size" method="get">
+<form class="history-page-size" method="get"{% if history_page_size_action %} action="{{ history_page_size_action }}"{% endif %}>
+  {% for name, value in history_page_size_hidden_params or [] %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
   <label for="history-page-size">Show</label>
   <select id="history-page-size" name="limit" data-auto-submit>
     {% for option in history_page_size_options %}

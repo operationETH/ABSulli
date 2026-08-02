@@ -57,6 +57,13 @@ def format_local_date(value: datetime | None) -> str:
     return local_value.strftime("%Y-%m-%d")
 
 
+def format_local_month_day(value: datetime | None) -> str:
+    local_value = local_datetime(value)
+    if local_value is None:
+        return ""
+    return local_value.strftime("%m/%d")
+
+
 def format_local_time(value: datetime | None) -> str:
     local_value = local_datetime(value)
     if local_value is None:

@@ -178,7 +178,7 @@
     <h2>Listen History for {{ display_name }}</h2>
     <div class="panel-actions">
       {% include "partials/history_page_size.html" %}
-      <a href="/history">View all history</a>
+      <a href="{{ global_history_url }}">View all history</a>
     </div>
   </div>
 
@@ -223,5 +223,6 @@
       </tbody>
     </table>
   </div>
+  {% include "partials/pagination.html" %}
 </section>
 {% endblock %}
