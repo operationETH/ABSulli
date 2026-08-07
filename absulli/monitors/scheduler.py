@@ -24,7 +24,7 @@ class AbsulliScheduler:
         self.client = AudiobookshelfClient(settings)
         self.notifier = NotificationManager(settings)
         self.activity = ActivityMonitor(self.client, self.notifier)
-        self.history = HistoryMonitor(self.client)
+        self.history = HistoryMonitor(self.client, self.notifier)
 
     def _ready_to_poll(self) -> bool:
         if not self.settings.auth_enabled:

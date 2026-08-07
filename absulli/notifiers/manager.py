@@ -13,6 +13,7 @@ NOTIFICATION_EVENT_DEFAULTS = {
     "playback_stop": False,
     "abs_connection_failed": False,
     "abs_connection_restored": False,
+    "new_book": False,
 }
 
 NOTIFICATION_EVENT_SETTINGS = {
@@ -20,6 +21,7 @@ NOTIFICATION_EVENT_SETTINGS = {
     "playback_stop": "notify_playback_stopped",
     "abs_connection_failed": "notify_abs_connection_failed",
     "abs_connection_restored": "notify_abs_connection_restored",
+    "new_book": "notify_new_book",
 }
 
 

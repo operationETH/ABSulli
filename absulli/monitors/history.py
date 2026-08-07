@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import time
@@ -5,7 +6,7 @@ from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
-from absulli.database.models import AbsUser, Library, ListeningHistory, MediaItem
+from absulli.database.models import AbsUser, Library, ListeningHistory, MediaItem, Setting
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.utils import friendly_names
 from absulli.http.normalizers import (
@@ -20,8 +21,40 @@ log = logging.getLogger(__name__)
 
 
 class HistoryMonitor:
-    def __init__(self, client: AudiobookshelfClient):
+    def __init__(self, client: AudiobookshelfClient, notifier=None):
         self.client = client
+        self.notifier = notifier
+
+    def _new_book_baseline_key(self, library_id: str) -> str:
+        digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_new_book_baseline_{digest}"
+
+    def _new_book_baseline_complete(self, db: Session, library_id: str) -> bool:
+        key = self._new_book_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return bool(row and str(row.value).strip().lower() == "true")
+
+    def _mark_new_book_baseline_complete(self, db: Session, library_id: str) -> None:
+        key = self._new_book_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = "true"
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value="true", updated_at=utcnow()))
+
+    async def _notify_new_books(self, db: Session, books: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for book in books:
+            title = book.get("title") or "Unknown"
+            author = book.get("author") or "Unknown author"
+            library_name = book.get("library_name") or "Audiobookshelf"
+            body = f"{title} by {author} was added to {library_name}."
+            try:
+                await self.notifier.notify(db, "new_book", "New book added", body)
+            except Exception as exc:
+                log.warning("New book notification failed for %s: %s", title, exc)
 
     def _chunks(self, values: Iterable[str], size: int = 900) -> Iterable[list[str]]:
         chunk: list[str] = []
@@ -263,6 +296,7 @@ class HistoryMonitor:
     async def sync_recent_items(self, db: Session, libraries: list[Library]) -> int:
         started = time.perf_counter()
         imported = 0
+        new_books: list[dict] = []
         request_limit = 5000
         for library in libraries:
             library_started = time.perf_counter()
@@ -274,6 +308,8 @@ class HistoryMonitor:
 
             current_ids = {item["abs_item_id"] for item in items if item.get("abs_item_id")}
             existing_map = self._media_items_by_abs_id(db, current_ids)
+            is_book_library = str(library.media_type or "").strip().lower() == "book"
+            baseline_complete = self._new_book_baseline_complete(db, library.abs_library_id) if is_book_library else False
             now = utcnow()
 
             if total is not None:
@@ -294,6 +330,11 @@ class HistoryMonitor:
                     db.add(existing)
                     existing_map[item_id] = existing
                     imported += 1
+                    if is_book_library and baseline_complete:
+                        new_books.append(dict(item))
+
+            if is_book_library and full_library_loaded and not baseline_complete:
+                self._mark_new_book_baseline_complete(db, library.abs_library_id)
 
             if current_ids and full_library_loaded:
                 deleted = (
@@ -315,6 +356,7 @@ class HistoryMonitor:
                 )
 
         db.commit()
+        await self._notify_new_books(db, new_books)
         elapsed = time.perf_counter() - started
         if elapsed >= 2:
             log.info("Recent item sync completed in %.2fs (%s imported)", elapsed, imported)

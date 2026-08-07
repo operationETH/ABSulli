@@ -125,6 +125,12 @@ NOTIFICATION_EVENT_SETTINGS = {
         "description": "Send when Audiobookshelf starts responding again.",
         "default": False,
     },
+    "new_book": {
+        "setting": "notify_new_book",
+        "label": "New Book Added",
+        "description": "Send when ABSulli detects a new book after the initial library scan.",
+        "default": False,
+    },
 }
 
 GENERAL_FIELD_CONFIGS = [

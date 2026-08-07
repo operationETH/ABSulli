@@ -629,3 +629,57 @@ def test_enrich_history_row_without_prefetched_lookups_uses_database_fallbacks()
     assert row["library_id"] == "lib-1"
     assert row["library_name"] == "Fallback Library"
     db.close()
+
+class FakeNotifier:
+    def __init__(self):
+        self.calls = []
+
+    async def notify(self, db, event_type, title, body):
+        self.calls.append((event_type, title, body))
+
+
+def test_new_book_notifications_start_after_silent_library_baseline():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(
+        library_items={"lib-1": items_payload(media_item_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    first_imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert first_imported == 1
+    assert notifier.calls == []
+
+    second_book = media_item_row(
+        id="item-2",
+        media={
+            "metadata": {
+                "title": "American Assassin",
+                "authors": [{"id": "author-1", "name": "Vince Flynn"}],
+            },
+            "duration": 4200,
+        },
+    )
+    client.library_items["lib-1"] = items_payload(media_item_row(), second_book, total=2)
+
+    second_imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert second_imported == 1
+    assert notifier.calls == [
+        (
+            "new_book",
+            "New book added",
+            "American Assassin by Vince Flynn was added to Audiobooks.",
+        )
+    ]
+    db.close()
