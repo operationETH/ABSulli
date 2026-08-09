@@ -683,3 +683,60 @@ def test_new_book_notifications_start_after_silent_library_baseline():
         )
     ]
     db.close()
+
+
+def test_new_podcast_notifications_start_after_silent_library_baseline():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-podcast",
+        name="Podcasts",
+        media_type="podcast",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    first_podcast = media_item_row(
+        id="podcast-1",
+        media={
+            "metadata": {
+                "title": "Existing Podcast",
+                "author": "Existing Author",
+            },
+            "duration": 0,
+        },
+    )
+    client = FakeClient(
+        library_items={"lib-podcast": items_payload(first_podcast, total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    first_imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert first_imported == 1
+    assert notifier.calls == []
+
+    second_podcast = media_item_row(
+        id="podcast-2",
+        media={
+            "metadata": {
+                "title": "Darknet Diaries",
+                "author": "Jack Rhysider",
+            },
+            "duration": 0,
+        },
+    )
+    client.library_items["lib-podcast"] = items_payload(first_podcast, second_podcast, total=2)
+
+    second_imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert second_imported == 1
+    assert notifier.calls == [
+        (
+            "new_podcast",
+            "New podcast added",
+            "Darknet Diaries by Jack Rhysider was added to Podcasts.",
+        )
+    ]
+    db.close()

@@ -14,6 +14,7 @@ NOTIFICATION_EVENT_DEFAULTS = {
     "abs_connection_failed": False,
     "abs_connection_restored": False,
     "new_book": False,
+    "new_podcast": False,
 }
 
 NOTIFICATION_EVENT_SETTINGS = {
@@ -22,6 +23,7 @@ NOTIFICATION_EVENT_SETTINGS = {
     "abs_connection_failed": "notify_abs_connection_failed",
     "abs_connection_restored": "notify_abs_connection_restored",
     "new_book": "notify_new_book",
+    "new_podcast": "notify_new_podcast",
 }
 
 

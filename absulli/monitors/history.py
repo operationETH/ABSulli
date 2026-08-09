@@ -56,6 +56,37 @@ class HistoryMonitor:
             except Exception as exc:
                 log.warning("New book notification failed for %s: %s", title, exc)
 
+    def _new_podcast_baseline_key(self, library_id: str) -> str:
+        digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_new_podcast_baseline_{digest}"
+
+    def _new_podcast_baseline_complete(self, db: Session, library_id: str) -> bool:
+        key = self._new_podcast_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return bool(row and str(row.value).strip().lower() == "true")
+
+    def _mark_new_podcast_baseline_complete(self, db: Session, library_id: str) -> None:
+        key = self._new_podcast_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = "true"
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value="true", updated_at=utcnow()))
+
+    async def _notify_new_podcasts(self, db: Session, podcasts: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for podcast in podcasts:
+            title = podcast.get("title") or "Unknown"
+            author = podcast.get("author") or "Unknown author"
+            library_name = podcast.get("library_name") or "Audiobookshelf"
+            body = f"{title} by {author} was added to {library_name}."
+            try:
+                await self.notifier.notify(db, "new_podcast", "New podcast added", body)
+            except Exception as exc:
+                log.warning("New podcast notification failed for %s: %s", title, exc)
+
     def _chunks(self, values: Iterable[str], size: int = 900) -> Iterable[list[str]]:
         chunk: list[str] = []
         seen: set[str] = set()
@@ -297,6 +328,7 @@ class HistoryMonitor:
         started = time.perf_counter()
         imported = 0
         new_books: list[dict] = []
+        new_podcasts: list[dict] = []
         request_limit = 5000
         for library in libraries:
             library_started = time.perf_counter()
@@ -308,8 +340,11 @@ class HistoryMonitor:
 
             current_ids = {item["abs_item_id"] for item in items if item.get("abs_item_id")}
             existing_map = self._media_items_by_abs_id(db, current_ids)
-            is_book_library = str(library.media_type or "").strip().lower() == "book"
-            baseline_complete = self._new_book_baseline_complete(db, library.abs_library_id) if is_book_library else False
+            media_type = str(library.media_type or "").strip().lower()
+            is_book_library = media_type == "book"
+            is_podcast_library = media_type == "podcast"
+            book_baseline_complete = self._new_book_baseline_complete(db, library.abs_library_id) if is_book_library else False
+            podcast_baseline_complete = self._new_podcast_baseline_complete(db, library.abs_library_id) if is_podcast_library else False
             now = utcnow()
 
             if total is not None:
@@ -330,11 +365,15 @@ class HistoryMonitor:
                     db.add(existing)
                     existing_map[item_id] = existing
                     imported += 1
-                    if is_book_library and baseline_complete:
+                    if is_book_library and book_baseline_complete:
                         new_books.append(dict(item))
+                    if is_podcast_library and podcast_baseline_complete:
+                        new_podcasts.append(dict(item))
 
-            if is_book_library and full_library_loaded and not baseline_complete:
+            if is_book_library and full_library_loaded and not book_baseline_complete:
                 self._mark_new_book_baseline_complete(db, library.abs_library_id)
+            if is_podcast_library and full_library_loaded and not podcast_baseline_complete:
+                self._mark_new_podcast_baseline_complete(db, library.abs_library_id)
 
             if current_ids and full_library_loaded:
                 deleted = (
@@ -357,6 +396,7 @@ class HistoryMonitor:
 
         db.commit()
         await self._notify_new_books(db, new_books)
+        await self._notify_new_podcasts(db, new_podcasts)
         elapsed = time.perf_counter() - started
         if elapsed >= 2:
             log.info("Recent item sync completed in %.2fs (%s imported)", elapsed, imported)
