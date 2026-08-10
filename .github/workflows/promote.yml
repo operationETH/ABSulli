@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to promote, such as 0.2.11"
         required: true
         type: string
 
@@ -56,25 +55,20 @@ jobs:
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Version must use stable semantic version format, such as 0.2.11"
+            echo "::error::Version must use stable semantic version format: MAJOR.MINOR.PATCH"
             exit 1
           fi
 
-          MINOR="${VERSION%.*}"
-
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
 
       - name: Promote GHCR image
         run: |
           docker buildx imagetools create \
             --tag ghcr.io/operationeth/absulli:latest \
-            --tag ghcr.io/operationeth/absulli:${{ steps.version.outputs.minor }} \
             ghcr.io/operationeth/absulli:${{ steps.version.outputs.version }}
 
       - name: Promote Docker Hub image
         run: |
           docker buildx imagetools create \
             --tag operationeth/absulli:latest \
-            --tag operationeth/absulli:${{ steps.version.outputs.minor }} \
             operationeth/absulli:${{ steps.version.outputs.version }}
