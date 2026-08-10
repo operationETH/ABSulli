@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import sys
 from urllib.parse import quote
 
@@ -29,7 +30,7 @@ HISTORY_PAGE_SIZE_OPTIONS = (10, 25, 50, 100)
 HISTORY_PAGE_SIZE_SETTING = "history_page_size"
 DEFAULT_HISTORY_PAGE_SIZE = 25
 
-SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "about")
+SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "api", "about")
 
 
 def clean_settings_tab(value: object) -> str:
@@ -43,6 +44,7 @@ def settings_tab_context(active_tab: str) -> list[dict[str, str]]:
         "network": "Network",
         "users": "Users",
         "notifications": "Notifications",
+        "api": "API",
         "about": "About",
     }
     return [{"id": tab_id, "label": labels[tab_id]} for tab_id in SETTINGS_TAB_IDS]
@@ -201,7 +203,6 @@ USER_FIELD_CONFIGS = [
     {"name": "current_password", "label": "Current Admin Password", "type": "password", "required": False, "placeholder": "Required to change password", "group": "account"},
     {"name": "auth_password", "label": "New Admin Password", "type": "password", "required": False, "placeholder": "Leave blank to keep", "group": "account"},
     {"name": "auth_password_confirm", "label": "Confirm New Password", "type": "password", "required": False, "placeholder": "", "group": "account"},
-    {"name": "api_token", "label": "ABSulli API Token", "type": "password", "required": False, "placeholder": "optional", "group": "api"},
 ]
 
 AGENT_FIELD_CONFIGS = {
@@ -515,10 +516,6 @@ def user_settings_context_fields(settings) -> list[dict[str, object]]:
             value = auth_username()
             from_env = settings.auth_username_from_env
             token_configured = False
-        elif field_name == "api_token":
-            value = ""
-            from_env = settings.api_token_from_env
-            token_configured = bool(settings.effective_api_token)
         else:
             value = saved_settings_field_value(settings, field)
             from_env = settings_field_from_env(settings, field_name)
@@ -560,19 +557,38 @@ def user_values_from_form(settings, form) -> tuple[dict[str, str], bool]:
             values["auth_password_hash"] = password_hash(new_password)
             password_changed = True
 
-    if not settings.api_token_from_env:
-        api_token = clean_agent_value(str(form.get("api_token") or ""))
-        if api_token:
-            if api_token == "change_me":
-                raise ValueError("API token cannot be change_me")
-            values["api_token"] = api_token
-        else:
-            existing = setup_state.get_setup_setting("api_token", "")
-            if existing:
-                values["api_token"] = existing
+
 
     return values, password_changed
 
+
+
+def api_settings_context(settings) -> dict[str, object]:
+    token = settings.effective_api_token or setup_state.ensure_api_token()
+    return {
+        "enabled": settings.effective_api_enabled,
+        "enabled_from_env": settings.api_enabled_from_env,
+        "token": token,
+        "token_from_env": settings.api_token_from_env,
+        "env_managed": settings.api_enabled_from_env or settings.api_token_from_env,
+    }
+
+
+def api_values_from_form(settings, form) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not settings.api_enabled_from_env:
+        values["api_enabled"] = "true" if form.get("api_enabled") == "on" else "false"
+    if not settings.api_token_from_env:
+        values["api_token"] = setup_state.ensure_api_token()
+    return values
+
+
+def regenerate_api_token(settings) -> str:
+    if settings.api_token_from_env:
+        raise ValueError("API key is managed by the environment")
+    token = secrets.token_urlsafe(32)
+    setup_state.set_setup_setting("api_token", token)
+    return token
 
 def network_values_from_form(settings, form) -> dict[str, str]:
     values: dict[str, str] = {}

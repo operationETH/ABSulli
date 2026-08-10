@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="settings-page">
 <section class="hero">
   <div>
     <h1>Settings</h1>
@@ -115,7 +116,7 @@
   <div class="panel-head">
     <div>
       <h2>Users</h2>
-      <p>Configure the local admin account and API access.</p>
+      <p>Configure the local admin account.</p>
     </div>
   </div>
   <form class="settings-form users-settings-form" method="post" action="/settings/users">
@@ -146,30 +147,6 @@
       </div>
     </div>
 
-    <div class="settings-subsection">
-      <div class="settings-subsection-head">
-        <h3>ABSulli API Access</h3>
-        <p>Optional token for scripts or external tools that call ABSulli endpoints.</p>
-      </div>
-      <div class="form-grid user-api-grid">
-        {% for field in user_fields %}
-          {% if field.group == 'api' %}
-          <label>
-            <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
-            <input
-              name="{{ field.name }}"
-              type="{{ field.type }}"
-              value="{{ field.value if field.type != 'password' else '' }}"
-              placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
-              autocomplete="off"
-              {% if field.from_env %}readonly{% endif %}
-            >
-            {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
-          </label>
-          {% endif %}
-        {% endfor %}
-      </div>
-    </div>
 
     <div class="settings-subsection">
       <div class="settings-subsection-head">
@@ -200,6 +177,69 @@
     <div class="settings-item"><strong>{{ item.label }}</strong><span>{{ item.value }}</span></div>
     {% endfor %}
   </div>
+</section>
+{% endif %}
+
+
+{% if settings_active_tab == 'api' %}
+<section class="panel api-settings-panel">
+  <div class="panel-head">
+    <div>
+      <h2>API Access</h2>
+    </div>
+    <span class="badge {{ 'good' if api_settings.enabled else 'unknown' }}">{{ 'Enabled' if api_settings.enabled else 'Disabled' }}</span>
+  </div>
+
+  <form class="settings-form api-settings-form" method="post" action="/settings/api">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="settings-list">
+      <div class="settings-row">
+        <div class="settings-row-copy">
+          <strong>Enable ABSulli API</strong>
+          {% if api_settings.enabled_from_env %}<div class="settings-row-badges"><em>Managed by .env</em></div>{% endif %}
+        </div>
+        <div class="settings-row-control">
+          <input type="checkbox" name="api_enabled" {% if api_settings.enabled %}checked{% endif %} {% if api_settings.enabled_from_env %}disabled{% endif %}>
+        </div>
+      </div>
+
+      <div class="settings-row api-key-row">
+        <div class="settings-row-copy">
+          <strong>ABSulli API Key</strong>
+          {% if api_settings.token_from_env %}<div class="settings-row-badges"><em>Managed by .env</em></div>{% endif %}
+        </div>
+        <div class="settings-row-control api-key-control">
+          <div class="api-key-input-group">
+            <input id="absulli-api-key" type="text" value="{{ '•' * 48 }}" data-api-key-value="{{ api_settings.token }}" data-api-key-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="ABSulli API key">
+            <button type="button" class="secondary api-key-icon-button" data-api-key-toggle aria-label="Show API key" title="Show API key">
+              <svg class="api-key-icon api-key-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="api-key-icon api-key-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
+            </button>
+            <button type="button" class="secondary api-key-icon-button" data-api-key-copy aria-label="Copy API key" title="Copy API key">
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            </button>
+            {% if not api_settings.token_from_env %}
+            <button type="submit" class="secondary api-key-icon-button" form="api-regenerate-form" data-api-key-regenerate aria-label="Regenerate API key" title="Regenerate API key">
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
+            </button>
+            {% endif %}
+          </div>
+          <small id="api-key-copy-status" hidden>Copied.</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions api-form-actions">
+      <button type="submit">Save Changes</button>
+    </div>
+  </form>
+
+  {% if not api_settings.token_from_env %}
+  <form id="api-regenerate-form" method="post" action="/settings/api/regenerate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  </form>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -335,4 +375,5 @@
   </div>
 </section>
 {% endif %}
+</div>
 {% endblock %}

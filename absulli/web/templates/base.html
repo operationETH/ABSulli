@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name | default('ABSulli') }}</title>
   <link rel="icon" href="/static/img/logo-mark.svg?v=2" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/css/app.css?v={{ absulli_version }}">
-  <script defer nonce="{{ request.state.absulli_csp_nonce | default('') }}" src="/static/js/app.js?v={{ absulli_version }}"></script>
+  <link rel="stylesheet" href="/static/css/app.css?v={{ static_asset_version('css/app.css') }}">
+  <script defer nonce="{{ request.state.absulli_csp_nonce | default('') }}" src="/static/js/app.js?v={{ static_asset_version('js/app.js') }}"></script>
 </head>
 <body>
   <header class="abs-topbar">
