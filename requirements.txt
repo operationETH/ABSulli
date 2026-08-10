@@ -10,4 +10,4 @@ prometheus-client==0.26.0
 APScheduler==3.11.3
 itsdangerous==2.2.0
 
-alembic==1.18.5
+alembic==1.19.0
