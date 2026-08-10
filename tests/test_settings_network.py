@@ -235,6 +235,7 @@ def test_cors_and_hsts_detail_settings_use_defaults_unless_env_overrides(monkeyp
     assert settings.cors_allowed_headers_list == [
         "Authorization",
         "Content-Type",
+        "X-API-Key",
         "X-Absulli-Api-Token",
         "X-Absulli-Metrics-Token",
         "X-CSRF-Token",

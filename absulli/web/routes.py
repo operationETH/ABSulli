@@ -104,6 +104,8 @@ from absulli.web.settings import (
     agent_required_fields_present,
     agent_settings_context,
     agent_values_from_form,
+    api_settings_context,
+    api_values_from_form,
     clean_settings_tab,
     general_settings_context,
     general_values_from_form,
@@ -113,6 +115,7 @@ from absulli.web.settings import (
     network_settings_context,
     network_values_from_form,
     notification_events_context,
+    regenerate_api_token,
     settings_field_from_env,
     settings_tab_context,
     user_settings_context_fields,
@@ -1240,13 +1243,13 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
                         f"{settings.effective_auth_login_lockout_seconds} second lockout"
                     ),
                 },
-                {"label": "ABSulli API Token", "value": "Configured" if settings.effective_api_token else "Not configured"},
             ],
             "user_fields": user_settings_context_fields(settings),
             "about_settings": about_settings_context(settings, db, update_status(settings, __version__)),
             "about_data": about_data_context(db),
             "general_fields": general_settings_context(settings),
             "network_fields": network_settings_context(settings),
+            "api_settings": api_settings_context(settings),
             "gotify": gotify_settings_context(settings),
             "notification_agents": agent_context,
             "notification_events": notification_events_context(),
@@ -1258,6 +1261,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         },
     )
     set_csrf_cookie(response, csrf_token)
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -1284,6 +1288,35 @@ async def settings_users_save(request: Request):
         rotate_session_version()
         set_session_cookie(response, values.get("auth_username") or auth_username())
     return response
+
+
+@router.post("/settings/api", response_class=HTMLResponse)
+async def settings_api_save(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    values = api_values_from_form(settings, form)
+    if values:
+        set_setup_settings(values)
+    return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+
+
+@router.post("/settings/api/regenerate", response_class=HTMLResponse)
+async def settings_api_regenerate(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        regenerate_api_token(settings)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=api&error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
 
 
 @router.post("/settings/network", response_class=HTMLResponse)

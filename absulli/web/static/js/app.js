@@ -672,3 +672,65 @@ function initializeNotificationAgentTabs(root = document) {
 }
 
 initializeNotificationAgentTabs();
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  if (!copied) throw new Error('Copy command failed');
+}
+
+document.addEventListener('click', async (event) => {
+  const toggle = event.target.closest('[data-api-key-toggle]');
+  if (toggle) {
+    const input = document.getElementById('absulli-api-key');
+    if (!input) return;
+    const masked = input.dataset.apiKeyMasked !== 'false';
+    const nextMasked = !masked;
+    input.value = nextMasked ? '•'.repeat(48) : (input.dataset.apiKeyValue || '');
+    input.dataset.apiKeyMasked = nextMasked ? 'true' : 'false';
+    const showIcon = toggle.querySelector('.api-key-icon-show');
+    const hideIcon = toggle.querySelector('.api-key-icon-hide');
+    if (showIcon) showIcon.hidden = !nextMasked;
+    if (hideIcon) hideIcon.hidden = nextMasked;
+    const label = nextMasked ? 'Show API key' : 'Hide API key';
+    toggle.setAttribute('aria-label', label);
+    toggle.setAttribute('title', label);
+    return;
+  }
+
+  const copy = event.target.closest('[data-api-key-copy]');
+  if (copy) {
+    const input = document.getElementById('absulli-api-key');
+    const status = document.getElementById('api-key-copy-status');
+    if (!input) return;
+    try {
+      await copyTextToClipboard(input.dataset.apiKeyValue || '');
+      if (status) status.textContent = 'Copied.';
+    } catch {
+      if (status) status.textContent = 'Copy failed.';
+    }
+    if (status) {
+      status.hidden = false;
+      window.setTimeout(() => { status.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  const regenerate = event.target.closest('[data-api-key-regenerate]');
+  if (regenerate && !window.confirm('Regenerate the API key? Applications using the current key will stop working.')) {
+    event.preventDefault();
+  }
+});

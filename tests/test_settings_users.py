@@ -20,6 +20,7 @@ def make_client(monkeypatch, store=None):
         "ABSULLI_AUTH_LOGIN_MAX_ATTEMPTS",
         "ABSULLI_AUTH_LOGIN_WINDOW_SECONDS",
         "ABSULLI_AUTH_LOGIN_LOCKOUT_SECONDS",
+        "ABSULLI_API_KEY",
         "ABSULLI_API_TOKEN",
     ]:
         monkeypatch.delenv(key, raising=False)
@@ -60,7 +61,6 @@ def test_users_settings_tab_renders_editable_auth_fields(monkeypatch):
             "auth_login_max_attempts": "5",
             "auth_login_window_seconds": "300",
             "auth_login_lockout_seconds": "600",
-            "api_token": "saved-api-token",
         },
     )
 
@@ -73,18 +73,15 @@ def test_users_settings_tab_renders_editable_auth_fields(monkeypatch):
     assert 'name="auth_username"' in response.text
     assert 'value="kenny"' in response.text
     assert "Configured — leave blank to keep" in response.text
-    assert "ABSulli API Access" in response.text
-    assert "Optional token for scripts or external tools that call ABSulli endpoints." in response.text
     assert "Revoke existing browser sessions after saving" in response.text
     assert "Auth Summary" in response.text
     assert "Login policy details can be changed in a .env file." in response.text
     assert "Login Protection" in response.text
-    assert "ABSulli API Token" in response.text
     assert 'name="auth_session_minutes"' not in response.text
     assert 'name="auth_login_max_attempts"' not in response.text
 
 
-def test_users_settings_save_updates_username_password_and_api_token(monkeypatch):
+def test_users_settings_save_updates_username_and_password(monkeypatch):
     client, store = make_client(monkeypatch, {"auth_password_hash": web_routes.password_hash("old-password")})
 
     response = client.post(
@@ -99,7 +96,6 @@ def test_users_settings_save_updates_username_password_and_api_token(monkeypatch
             "auth_login_max_attempts": "6",
             "auth_login_window_seconds": "400",
             "auth_login_lockout_seconds": "800",
-            "api_token": "new-api-token",
         },
         follow_redirects=False,
     )
@@ -108,15 +104,14 @@ def test_users_settings_save_updates_username_password_and_api_token(monkeypatch
     assert response.headers["location"] == "/settings?tab=users&saved=users"
     assert response.headers["x-test-session-user"] == "newadmin"
     assert store["auth_username"] == "newadmin"
-    assert store["api_token"] == "new-api-token"
     assert store["auth_password_hash"] != "old-password"
     assert auth_username() == "newadmin"
     assert verify_login("newadmin", "new-password") is True
 
 
-def test_users_settings_blank_password_and_api_token_keep_existing_values(monkeypatch):
+def test_users_settings_blank_password_keeps_existing_value(monkeypatch):
     existing_hash = web_routes.password_hash("old-password")
-    client, store = make_client(monkeypatch, {"auth_password_hash": existing_hash, "api_token": "saved-token"})
+    client, store = make_client(monkeypatch, {"auth_password_hash": existing_hash})
 
     response = client.post(
         "/settings/users",
@@ -130,14 +125,12 @@ def test_users_settings_blank_password_and_api_token_keep_existing_values(monkey
             "auth_login_max_attempts": "8",
             "auth_login_window_seconds": "900",
             "auth_login_lockout_seconds": "900",
-            "api_token": "",
         },
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert store["auth_password_hash"] == existing_hash
-    assert store["api_token"] == "saved-token"
     assert "x-test-session-user" not in response.headers
 
 
@@ -176,7 +169,6 @@ def test_users_settings_rejects_password_change_without_current_password(monkeyp
             "current_password": "",
             "auth_password": "new-password",
             "auth_password_confirm": "new-password",
-            "api_token": "",
         },
         follow_redirects=False,
     )
@@ -198,7 +190,6 @@ def test_users_settings_rejects_password_change_with_wrong_current_password(monk
             "current_password": "wrong-password",
             "auth_password": "new-password",
             "auth_password_confirm": "new-password",
-            "api_token": "",
         },
         follow_redirects=False,
     )
@@ -210,9 +201,8 @@ def test_users_settings_rejects_password_change_with_wrong_current_password(monk
 
 
 def test_users_settings_env_values_win_over_saved_settings(monkeypatch):
-    client, store = make_client(monkeypatch, {"auth_username": "saved", "api_token": "saved-token"})
+    client, store = make_client(monkeypatch, {"auth_username": "saved"})
     monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "envadmin")
-    monkeypatch.setenv("ABSULLI_API_TOKEN", "env-token")
     get_settings.cache_clear()
 
     page = client.get("/settings?tab=users")
@@ -231,14 +221,12 @@ def test_users_settings_env_values_win_over_saved_settings(monkeypatch):
             "auth_login_max_attempts": "7",
             "auth_login_window_seconds": "700",
             "auth_login_lockout_seconds": "800",
-            "api_token": "new-token",
         },
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert store["auth_username"] == "saved"
-    assert store["api_token"] == "saved-token"
 
 
 def test_effective_user_settings_read_saved_values(monkeypatch):
@@ -249,7 +237,6 @@ def test_effective_user_settings_read_saved_values(monkeypatch):
             "auth_login_max_attempts": "4",
             "auth_login_window_seconds": "222",
             "auth_login_lockout_seconds": "444",
-            "api_token": "stored-api-token",
         },
     )
 
@@ -260,4 +247,3 @@ def test_effective_user_settings_read_saved_values(monkeypatch):
     assert settings.effective_auth_login_max_attempts == 4
     assert settings.effective_auth_login_window_seconds == 222
     assert settings.effective_auth_login_lockout_seconds == 444
-    assert settings.effective_api_token == "stored-api-token"

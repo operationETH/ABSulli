@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Setup · {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/js/app.js" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v={{ static_asset_version('css/app.css') }}">
+  <script src="/static/js/app.js?v={{ static_asset_version('js/app.js') }}" defer></script>
 </head>
 <body class="login-page">
   <main class="login-shell">
