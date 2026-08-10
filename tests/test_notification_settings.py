@@ -307,6 +307,7 @@ def test_notification_events_are_global_and_visible_for_every_agent(monkeypatch)
         'notify_abs_connection_restored',
         'notify_new_book',
         'notify_new_podcast',
+        'notify_new_podcast_episode',
     ]:
         assert response.text.count(f'name="{setting}"') == 9
     assert response.text.count('Notification Events') == 9
@@ -334,6 +335,7 @@ def test_notification_event_settings_use_global_names_when_saved_from_any_agent(
     assert store['notify_abs_connection_restored'] == 'true'
     assert store['notify_new_book'] == 'false'
     assert store['notify_new_podcast'] == 'false'
+    assert store['notify_new_podcast_episode'] == 'false'
     assert 'gotify_notify_playback_started' not in store
     assert 'gotify_notify_playback_stopped' not in store
 
@@ -351,6 +353,7 @@ def test_notification_events_default_to_unchecked(monkeypatch):
         'notify_abs_connection_restored',
         'notify_new_book',
         'notify_new_podcast',
+        'notify_new_podcast_episode',
     ]:
         marker = f'name="{setting}"'
         start = response.text.index(marker)
@@ -372,10 +375,11 @@ def test_notification_manager_defaults_all_events_disabled(monkeypatch):
     assert event_enabled('abs_connection_restored') is False
     assert event_enabled('new_book') is False
     assert event_enabled('new_podcast') is False
+    assert event_enabled('new_podcast_episode') is False
 
 
 def test_notification_manager_returns_true_for_stored_enabled_event(monkeypatch):
-    client, _store = make_client(monkeypatch, {"notify_playback_started": "true", "notify_new_book": "true", "notify_new_podcast": "true"})
+    client, _store = make_client(monkeypatch, {"notify_playback_started": "true", "notify_new_book": "true", "notify_new_podcast": "true", "notify_new_podcast_episode": "true"})
     assert client
 
     from absulli.notifiers.manager import event_enabled
@@ -384,6 +388,7 @@ def test_notification_manager_returns_true_for_stored_enabled_event(monkeypatch)
     assert event_enabled("playback_stop") is False
     assert event_enabled("new_book") is True
     assert event_enabled("new_podcast") is True
+    assert event_enabled("new_podcast_episode") is True
 
 
 def test_settings_general_tab_is_default(monkeypatch):

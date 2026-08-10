@@ -16,18 +16,21 @@ class FakeClient:
         users=None,
         libraries=None,
         library_items=None,
+        items=None,
         sessions=None,
         fail_sessions_for=None,
     ):
         self.users = users if users is not None else {"users": []}
         self.libraries = libraries if libraries is not None else {"libraries": []}
         self.library_items = library_items if library_items is not None else {}
+        self.items = items if items is not None else {}
         self.sessions = sessions if sessions is not None else {}
         self.fail_sessions_for = set(fail_sessions_for or [])
         self.calls = {
             "get_users": 0,
             "get_libraries": 0,
             "get_library_items": [],
+            "get_item": [],
             "get_user_listening_sessions": [],
         }
 
@@ -42,6 +45,10 @@ class FakeClient:
     async def get_library_items(self, library_id, limit=5000):
         self.calls["get_library_items"].append((library_id, limit))
         return self.library_items.get(library_id, {"results": [], "total": 0})
+
+    async def get_item(self, item_id, expanded=False):
+        self.calls["get_item"].append((item_id, expanded))
+        return self.items.get(item_id, {})
 
     async def get_user_listening_sessions(self, user_id, items_per_page=50, page=0):
         self.calls["get_user_listening_sessions"].append((user_id, items_per_page, page))
@@ -739,4 +746,177 @@ def test_new_podcast_notifications_start_after_silent_library_baseline():
             "Darknet Diaries by Jack Rhysider was added to Podcasts.",
         )
     ]
+    db.close()
+
+
+def test_new_podcast_episode_notifications_start_after_silent_episode_baseline(monkeypatch):
+    monkeypatch.setattr("absulli.monitors.history.event_enabled", lambda event_type: event_type == "new_podcast_episode")
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-podcast",
+        name="Podcasts",
+        media_type="podcast",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    podcast = media_item_row(
+        id="podcast-1",
+        media={
+            "metadata": {
+                "title": "The History of English Podcast",
+                "author": "Kevin Stroud",
+            },
+            "duration": 0,
+        },
+    )
+    client = FakeClient(
+        library_items={"lib-podcast": items_payload(podcast, total=1)},
+        items={
+            "podcast-1": {
+                "id": "podcast-1",
+                "media": {
+                    "metadata": {"title": "The History of English Podcast"},
+                    "episodes": [
+                        {"id": "episode-11", "title": "Episode 11: Germanic Ancestors"},
+                    ],
+                },
+            }
+        },
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    first_imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert first_imported == 1
+    assert notifier.calls == []
+    assert client.calls["get_item"] == [("podcast-1", True)]
+
+    client.items["podcast-1"]["media"]["episodes"].append(
+        {"id": "episode-12", "title": "Episode 12: Early Greek, Hittite and the Trojan War (Extended Version)"}
+    )
+
+    second_imported = asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert second_imported == 0
+    assert notifier.calls == [
+        (
+            "new_podcast_episode",
+            "New podcast episode added",
+            "The History of English Podcast - Episode 12: Early Greek, Hittite and the Trojan War (Extended Version) was added to Podcasts.",
+        )
+    ]
+    db.close()
+
+
+def test_new_podcast_episode_notifications_use_exact_episode_title(monkeypatch):
+    monkeypatch.setattr("absulli.monitors.history.event_enabled", lambda event_type: event_type == "new_podcast_episode")
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-podcast",
+        name="podcasts test",
+        media_type="podcast",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    podcast = media_item_row(
+        id="crime-junkie",
+        media={"metadata": {"title": "Crime Junkie", "author": "Audiochuck"}, "duration": 0},
+    )
+    client = FakeClient(
+        library_items={"lib-podcast": items_payload(podcast, total=1)},
+        items={
+            "crime-junkie": {
+                "media": {
+                    "metadata": {"title": "Crime Junkie"},
+                    "episodes": [{"id": "episode-1", "title": "MURDERED: Joyce LePage Part 1"}],
+                }
+            }
+        },
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    client.items["crime-junkie"]["media"]["episodes"].append(
+        {"id": "episode-2", "title": "MURDERED: Joyce LePage Part 2"}
+    )
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert notifier.calls == [
+        (
+            "new_podcast_episode",
+            "New podcast episode added",
+            "Crime Junkie - MURDERED: Joyce LePage Part 2 was added to podcasts test.",
+        )
+    ]
+    db.close()
+
+
+def test_podcast_episode_details_are_not_fetched_when_notification_is_disabled(monkeypatch):
+    monkeypatch.setattr("absulli.monitors.history.event_enabled", lambda event_type: False)
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-podcast",
+        name="Podcasts",
+        media_type="podcast",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    podcast = media_item_row(
+        id="podcast-1",
+        media={"metadata": {"title": "Podcast", "author": "Author"}, "duration": 0},
+    )
+    client = FakeClient(library_items={"lib-podcast": items_payload(podcast, total=1)})
+    monitor = HistoryMonitor(client, FakeNotifier())
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert client.calls["get_item"] == []
+    db.close()
+
+
+def test_disabling_podcast_episode_notifications_clears_existing_baseline(monkeypatch):
+    state = {"enabled": True}
+    monkeypatch.setattr("absulli.monitors.history.event_enabled", lambda event_type: state["enabled"])
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-podcast",
+        name="Podcasts",
+        media_type="podcast",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    podcast = media_item_row(
+        id="podcast-1",
+        media={"metadata": {"title": "Podcast", "author": "Author"}, "duration": 0},
+    )
+    client = FakeClient(
+        library_items={"lib-podcast": items_payload(podcast, total=1)},
+        items={
+            "podcast-1": {
+                "media": {
+                    "metadata": {"title": "Podcast"},
+                    "episodes": [{"id": "episode-1", "title": "Episode 1"}],
+                }
+            }
+        },
+    )
+    monitor = HistoryMonitor(client, FakeNotifier())
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    assert monitor._podcast_episode_baseline(db, "podcast-1") == {"episode-1"}
+
+    state["enabled"] = False
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+
+    assert monitor._podcast_episode_baseline(db, "podcast-1") is None
     db.close()

@@ -137,6 +137,12 @@ NOTIFICATION_EVENT_SETTINGS = {
         "description": "Send when ABSulli detects a new podcast after the initial library scan.",
         "default": False,
     },
+    "new_podcast_episode": {
+        "setting": "notify_new_podcast_episode",
+        "label": "New Podcast Episode Added",
+        "description": "Send when ABSulli detects a newly downloaded podcast episode after the initial episode scan.",
+        "default": False,
+    },
 }
 
 GENERAL_FIELD_CONFIGS = [
