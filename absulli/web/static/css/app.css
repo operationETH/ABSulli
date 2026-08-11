@@ -1607,8 +1607,15 @@ button.secondary { background: #262626; color: #ddd; border-color: #444; }
   min-width: 0;
 }
 .agent-settings-form .form-grid .field-check {
-  align-self: end;
+  align-self: center;
+  justify-self: start;
+  width: max-content;
   min-height: 38px;
+}
+.agent-settings-form .form-grid .field-check input[type="checkbox"] {
+  width: auto;
+  min-width: auto;
+  margin: 0;
 }
 @media (max-width: 760px) {
   .agent-settings-form .form-grid {
@@ -1972,12 +1979,12 @@ a.version-status-badge:hover { filter: brightness(1.12); }
 }
 .api-key-input-group input {
   min-width: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .api-key-input-group button {
   white-space: nowrap;
 }
-#api-regenerate-form {
+#api-regenerate-form,
+#metrics-regenerate-form {
   display: none;
 }
 @media (max-width: 720px) {
@@ -2004,6 +2011,14 @@ a.version-status-badge:hover { filter: brightness(1.12); }
 }
 .settings-page .general-settings-grid {
   gap: 18px;
+}
+.settings-page .form-grid input,
+.settings-page .settings-row-control input[type="text"],
+.settings-page .settings-row-control input[type="password"],
+.settings-page .settings-row-control input[type="number"],
+.settings-page .settings-row-control input[type="url"] {
+  font-family: inherit;
+  font-size: 14px;
 }
 .settings-page .settings-row {
   grid-template-columns: minmax(220px, 320px) minmax(0, 520px);
@@ -2146,4 +2161,13 @@ a.version-status-badge:hover { filter: brightness(1.12); }
 .settings-page .panel,
 .settings-page .panel-head {
   border-color: var(--line);
+}
+
+.settings-page .abs-api-key-input-group {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+@media (max-width: 720px) {
+  .settings-page .abs-api-key-input-group {
+    grid-template-columns: 1fr 1fr;
+  }
 }

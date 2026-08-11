@@ -42,15 +42,29 @@
         {% else %}
         <label>
           <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
+          {% if field.name == 'abs_api_key' %}
+          <div class="api-key-input-group abs-api-key-input-group">
+            <input id="abs-api-key" name="abs_api_key" type="{% if field.from_env %}text{% else %}password{% endif %}" value="{% if field.from_env %}Configured via .env read only{% else %}{{ field.value }}{% endif %}" data-abs-api-key-value="{{ field.value }}" data-abs-api-key-from-env="{{ 'true' if field.from_env else 'false' }}" data-abs-api-key-masked="true" autocomplete="off" spellcheck="false" {% if field.from_env %}readonly{% endif %}>
+            <button type="button" class="secondary api-key-icon-button" data-abs-api-key-toggle aria-label="Show Audiobookshelf API key" title="Show Audiobookshelf API key">
+              <svg class="api-key-icon abs-api-key-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="api-key-icon abs-api-key-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
+            </button>
+            <button type="button" class="secondary api-key-icon-button" data-abs-api-key-copy aria-label="Copy Audiobookshelf API key" title="Copy Audiobookshelf API key">
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            </button>
+          </div>
+          <small id="abs-api-key-copy-status" hidden>Copied.</small>
+          {% else %}
           <input
             name="{{ field.name }}"
             type="{{ field.type }}"
-            value="{{ field.value if field.type != 'password' else '' }}"
-            placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+            value="{% if field.name == 'abs_url' and field.from_env %}Configured via .env read only{% else %}{{ field.value }}{% endif %}"
+            placeholder="{{ field.placeholder }}"
             autocomplete="off"
             {% if field.from_env %}readonly{% endif %}
           >
-          {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+          {% if field.from_env and field.name != 'abs_url' %}<small>Managed by .env.</small>{% endif %}
+          {% endif %}
         </label>
         {% endif %}
       {% endfor %}
@@ -82,19 +96,36 @@
           <small>{{ field.description }}</small>
           <div class="settings-row-badges">
             {% if field.restart_required %}<em>Restart Required</em>{% endif %}
-            {% if field.from_env %}<em>Managed by .env</em>{% endif %}
+            {% if field.from_env and field.name != 'metrics_token' %}<em>Managed by .env</em>{% endif %}
           </div>
           {% if field.advanced_note %}<small>{{ field.advanced_note }}</small>{% endif %}
         </div>
-        <div class="settings-row-control">
+        <div class="settings-row-control{% if field.name == 'metrics_token' %} api-key-control{% endif %}">
           {% if field.type == 'checkbox' %}
           <input type="checkbox" name="{{ field.name }}" {% if field.value == 'true' %}checked{% endif %} {% if field.from_env %}disabled{% endif %}>
+          {% elif field.name == 'metrics_token' %}
+          <div class="api-key-input-group">
+            <input id="metrics-token" name="metrics_token" type="{% if field.from_env %}text{% else %}password{% endif %}" value="{% if field.from_env %}Configured via .env read only{% else %}{{ field.value }}{% endif %}" data-metrics-token-value="{{ field.value }}" data-metrics-token-from-env="{{ 'true' if field.from_env else 'false' }}" autocomplete="off" spellcheck="false" {% if field.from_env %}readonly{% endif %}>
+            <button type="button" class="secondary api-key-icon-button" data-metrics-token-toggle aria-label="Show metrics token" title="Show metrics token" {% if not field.token_configured %}disabled{% endif %}>
+              <svg class="api-key-icon metrics-token-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="api-key-icon metrics-token-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
+            </button>
+            <button type="button" class="secondary api-key-icon-button" data-metrics-token-copy aria-label="Copy metrics token" title="Copy metrics token" {% if not field.token_configured %}disabled{% endif %}>
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            </button>
+            {% if not field.from_env %}
+            <button type="submit" class="secondary api-key-icon-button" form="metrics-regenerate-form" data-metrics-token-regenerate aria-label="Regenerate metrics token" title="Regenerate metrics token">
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
+            </button>
+            {% endif %}
+          </div>
+          <small id="metrics-token-copy-status" hidden>Copied.</small>
           {% else %}
           <input
             name="{{ field.name }}"
             type="{{ field.type }}"
             value="{{ field.value if field.type != 'password' else '' }}"
-            placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+            placeholder="{{ 'Configured. Leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
             autocomplete="off"
             {% if field.from_env %}readonly{% endif %}
           >
@@ -107,6 +138,9 @@
     <div class="form-actions">
       <button type="submit">Save Changes</button>
     </div>
+  </form>
+  <form id="metrics-regenerate-form" method="post" action="/settings/network/metrics-token/regenerate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>
 </section>
 {% endif %}
@@ -136,11 +170,11 @@
               name="{{ field.name }}"
               type="{{ field.type }}"
               value="{{ field.value if field.type != 'password' else '' }}"
-              placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+              placeholder="{{ field.placeholder }}"
               autocomplete="off"
               {% if field.from_env %}readonly{% endif %}
             >
-            {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+            {% if field.from_env %}<small>Managed by .env.</small>{% endif %}
           </label>
           {% endif %}
         {% endfor %}
@@ -298,11 +332,11 @@
               name="{{ field.name }}"
               type="{{ field.type }}"
               value="{{ field.value if field.type != 'password' else '' }}"
-              placeholder="{{ 'Configured — leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
+              placeholder="{{ 'Configured. Leave blank to keep' if field.type == 'password' and field.token_configured else field.placeholder }}"
               autocomplete="off"
               {% if field.from_env %}readonly{% endif %}
             >
-            {% if field.from_env %}<small>Managed by .env.</small>{% elif field.type == 'password' and field.token_configured %}<small>Leave blank to keep the saved value.</small>{% endif %}
+            {% if field.from_env %}<small>Managed by .env.</small>{% endif %}
           </label>
           {% endif %}
         {% endfor %}

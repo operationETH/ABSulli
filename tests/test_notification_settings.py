@@ -77,6 +77,19 @@ def test_gotify_save_accepts_token_from_settings_page(monkeypatch):
     assert store["gotify_token"] == "app-token"
 
 
+def test_notification_placeholders_are_clean(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications&agent=gotify")
+
+    assert response.status_code == 200
+    assert 'name="gotify_url"' in response.text
+    assert 'name="gotify_token"' in response.text
+    assert 'placeholder="http://gotify:80"' not in response.text
+    assert 'placeholder="Application token"' not in response.text
+    assert "Leave blank to keep the saved value." not in response.text
+
+
 def test_settings_page_shows_gotify_form_with_saved_values(monkeypatch):
     client, _store = make_client(
         monkeypatch,
@@ -89,7 +102,7 @@ def test_settings_page_shows_gotify_form_with_saved_values(monkeypatch):
     assert "Notification Settings" in response.text
     assert "Gotify" in response.text
     assert 'value="http://gotify.local"' in response.text
-    assert "Configured — leave blank to keep" in response.text
+    assert "Configured. Leave blank to keep" in response.text
     assert "Enabled" in response.text
 
 

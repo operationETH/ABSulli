@@ -116,6 +116,7 @@ from absulli.web.settings import (
     network_values_from_form,
     notification_events_context,
     regenerate_api_token,
+    regenerate_metrics_token,
     settings_field_from_env,
     settings_tab_context,
     user_settings_context_fields,
@@ -1317,6 +1318,21 @@ async def settings_api_regenerate(request: Request):
     except ValueError as exc:
         return RedirectResponse(f"/settings?tab=api&error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+
+
+@router.post("/settings/network/metrics-token/regenerate", response_class=HTMLResponse)
+async def settings_metrics_token_regenerate(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        regenerate_metrics_token(settings)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=network&error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/settings?tab=network&saved=network", status_code=303)
 
 
 @router.post("/settings/network", response_class=HTMLResponse)

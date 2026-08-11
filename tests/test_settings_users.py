@@ -72,7 +72,9 @@ def test_users_settings_tab_renders_editable_auth_fields(monkeypatch):
     assert 'name="current_password"' in response.text
     assert 'name="auth_username"' in response.text
     assert 'value="kenny"' in response.text
-    assert "Configured — leave blank to keep" in response.text
+    assert 'placeholder="Required to change password"' in response.text
+    assert "Configured — leave blank to keep" not in response.text
+    assert "Leave blank to keep the saved value." not in response.text
     assert "Revoke existing browser sessions after saving" in response.text
     assert "Auth Summary" in response.text
     assert "Login policy details can be changed in a .env file." in response.text

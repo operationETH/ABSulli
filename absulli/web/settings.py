@@ -149,7 +149,7 @@ NOTIFICATION_EVENT_SETTINGS = {
 
 GENERAL_FIELD_CONFIGS = [
     {"name": "abs_url", "label": "Audiobookshelf URL", "type": "url", "required": True, "placeholder": "http://audiobookshelf:13378"},
-    {"name": "abs_api_key", "label": "Audiobookshelf API Key", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+    {"name": "abs_api_key", "label": "Audiobookshelf API Key", "type": "password", "required": True, "placeholder": ""},
     {"name": "abs_verify_ssl", "label": "Verify SSL Certificates", "type": "checkbox", "required": False, "default": True},
     {"name": "abs_request_timeout", "label": "Request Timeout", "type": "number", "required": True, "placeholder": "15"},
     {"name": "abs_poll_interval", "label": "Activity Poll Interval", "type": "number", "required": True, "placeholder": "15"},
@@ -183,9 +183,9 @@ NETWORK_FIELD_CONFIGS = [
     {
         "name": "metrics_token",
         "label": "Metrics Token",
-        "description": "Optional token required for Prometheus /metrics access.",
+        "description": "Protect Prometheus /metrics access with a token. Leave blank to disable token authentication.",
         "type": "password",
-        "placeholder": "optional",
+        "placeholder": "",
     },
     {
         "name": "cors_allowed_origins",
@@ -201,7 +201,7 @@ NETWORK_FIELD_CONFIGS = [
 USER_FIELD_CONFIGS = [
     {"name": "auth_username", "label": "Admin Username", "type": "text", "required": True, "placeholder": "admin", "group": "account"},
     {"name": "current_password", "label": "Current Admin Password", "type": "password", "required": False, "placeholder": "Required to change password", "group": "account"},
-    {"name": "auth_password", "label": "New Admin Password", "type": "password", "required": False, "placeholder": "Leave blank to keep", "group": "account"},
+    {"name": "auth_password", "label": "New Admin Password", "type": "password", "required": False, "placeholder": "", "group": "account"},
     {"name": "auth_password_confirm", "label": "Confirm New Password", "type": "password", "required": False, "placeholder": "", "group": "account"},
 ]
 
@@ -215,7 +215,7 @@ AGENT_FIELD_CONFIGS = {
             {"name": "email_from", "label": "From Address", "type": "email", "required": True, "placeholder": "absulli@example.com"},
             {"name": "email_to", "label": "To Address", "type": "email", "required": True, "placeholder": "you@example.com"},
             {"name": "email_smtp_username", "label": "SMTP Username", "type": "text", "required": False, "placeholder": "optional"},
-            {"name": "email_smtp_password", "label": "SMTP Password", "type": "password", "required": False, "placeholder": "Configured — leave blank to keep"},
+            {"name": "email_smtp_password", "label": "SMTP Password", "type": "password", "required": False, "placeholder": "optional"},
             {"name": "email_use_tls", "label": "Use SSL/TLS", "type": "checkbox", "required": False, "default": True},
         ],
     },
@@ -230,8 +230,8 @@ AGENT_FIELD_CONFIGS = {
         "label": "Gotify",
         "icon": "☁",
         "fields": [
-            {"name": "gotify_url", "label": "Server URL", "type": "url", "required": True, "placeholder": "http://gotify:80"},
-            {"name": "gotify_token", "label": "Application Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+            {"name": "gotify_url", "label": "Server URL", "type": "url", "required": True, "placeholder": ""},
+            {"name": "gotify_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "ntfy": {
@@ -239,22 +239,22 @@ AGENT_FIELD_CONFIGS = {
         "icon": "▣",
         "fields": [
             {"name": "ntfy_url", "label": "Topic URL", "type": "url", "required": True, "placeholder": "https://ntfy.sh/my-topic"},
-            {"name": "ntfy_token", "label": "Access Token", "type": "password", "required": False, "placeholder": "optional"},
+            {"name": "ntfy_token", "label": "Access Token", "type": "password", "required": False, "placeholder": ""},
         ],
     },
     "pushbullet": {
         "label": "Pushbullet",
         "icon": "⏻",
         "fields": [
-            {"name": "pushbullet_token", "label": "Access Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+            {"name": "pushbullet_token", "label": "Access Token", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "pushover": {
         "label": "Pushover",
         "icon": "Ⓟ",
         "fields": [
-            {"name": "pushover_app_token", "label": "Application Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
-            {"name": "pushover_user_key", "label": "User Key", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+            {"name": "pushover_app_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
+            {"name": "pushover_user_key", "label": "User Key", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "slack": {
@@ -268,8 +268,8 @@ AGENT_FIELD_CONFIGS = {
         "label": "Telegram",
         "icon": "◉",
         "fields": [
-            {"name": "telegram_bot_token", "label": "Bot Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
-            {"name": "telegram_chat_id", "label": "Chat ID", "type": "text", "required": True, "placeholder": "123456789"},
+            {"name": "telegram_bot_token", "label": "Bot Token", "type": "password", "required": True, "placeholder": ""},
+            {"name": "telegram_chat_id", "label": "Chat ID", "type": "text", "required": True, "placeholder": ""},
         ],
     },
     "webhook": {
@@ -605,8 +605,6 @@ def network_values_from_form(settings, form) -> dict[str, str]:
             values[field_name] = "true" if form.get(field_name) == "on" else "false"
             continue
         submitted = clean_agent_value(str(form.get(field_name) or ""))
-        if field_type == "password" and not submitted:
-            submitted = setup_state.get_setup_setting(field_name, "")
         values[field_name] = submitted
 
     if values.get("metrics_token") == "change_me":
@@ -614,6 +612,14 @@ def network_values_from_form(settings, form) -> dict[str, str]:
     if "cors_allowed_origins" in values:
         values["cors_allowed_origins"] = clean_cors_origins(values.get("cors_allowed_origins", ""))
     return values
+
+
+def regenerate_metrics_token(settings) -> str:
+    if settings_field_from_env(settings, "metrics_token"):
+        raise ValueError("Metrics token is managed by the environment")
+    token = secrets.token_urlsafe(32)
+    setup_state.set_setup_setting("metrics_token", token)
+    return token
 
 
 def gotify_settings_context(settings) -> dict[str, object]:
