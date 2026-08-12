@@ -242,6 +242,17 @@ def test_settings_page_shows_all_notification_agent_tabs(monkeypatch):
     assert "Coming soon" not in response.text
 
 
+def test_notification_agent_tabs_render_service_icons(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications")
+
+    assert response.status_code == 200
+    assert response.text.count('<span class="agent-tab-icon" aria-hidden="true">') == 9
+    assert response.text.count("<svg") >= 9
+    assert "/static/img/notifications/" not in response.text
+
+
 def test_discord_agent_save_persists_webhook(monkeypatch):
     client, store = make_client(monkeypatch)
 

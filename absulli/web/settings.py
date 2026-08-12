@@ -208,7 +208,8 @@ USER_FIELD_CONFIGS = [
 AGENT_FIELD_CONFIGS = {
     "email": {
         "label": "Email",
-        "icon": "✉",
+        "icon": "",
+        "icon_template": "partials/notification_icons/email.svg",
         "fields": [
             {"name": "email_smtp_host", "label": "SMTP Host", "type": "text", "required": True, "placeholder": "smtp.example.com"},
             {"name": "email_smtp_port", "label": "SMTP Port", "type": "number", "required": True, "placeholder": "465"},
@@ -221,14 +222,16 @@ AGENT_FIELD_CONFIGS = {
     },
     "discord": {
         "label": "Discord",
-        "icon": "☯",
+        "icon": "",
+        "icon_template": "partials/notification_icons/discord.svg",
         "fields": [
             {"name": "discord_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://discord.com/api/webhooks/..."},
         ],
     },
     "gotify": {
         "label": "Gotify",
-        "icon": "☁",
+        "icon": "",
+        "icon_template": "partials/notification_icons/gotify.svg",
         "fields": [
             {"name": "gotify_url", "label": "Server URL", "type": "url", "required": True, "placeholder": ""},
             {"name": "gotify_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
@@ -236,7 +239,8 @@ AGENT_FIELD_CONFIGS = {
     },
     "ntfy": {
         "label": "ntfy.sh",
-        "icon": "▣",
+        "icon": "",
+        "icon_template": "partials/notification_icons/ntfy.svg",
         "fields": [
             {"name": "ntfy_url", "label": "Topic URL", "type": "url", "required": True, "placeholder": "https://ntfy.sh/my-topic"},
             {"name": "ntfy_token", "label": "Access Token", "type": "password", "required": False, "placeholder": ""},
@@ -244,14 +248,16 @@ AGENT_FIELD_CONFIGS = {
     },
     "pushbullet": {
         "label": "Pushbullet",
-        "icon": "⏻",
+        "icon": "",
+        "icon_template": "partials/notification_icons/pushbullet.svg",
         "fields": [
             {"name": "pushbullet_token", "label": "Access Token", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "pushover": {
         "label": "Pushover",
-        "icon": "Ⓟ",
+        "icon": "",
+        "icon_template": "partials/notification_icons/pushover.svg",
         "fields": [
             {"name": "pushover_app_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
             {"name": "pushover_user_key", "label": "User Key", "type": "password", "required": True, "placeholder": ""},
@@ -259,14 +265,16 @@ AGENT_FIELD_CONFIGS = {
     },
     "slack": {
         "label": "Slack",
-        "icon": "✣",
+        "icon": "",
+        "icon_template": "partials/notification_icons/slack.svg",
         "fields": [
             {"name": "slack_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://hooks.slack.com/services/..."},
         ],
     },
     "telegram": {
         "label": "Telegram",
-        "icon": "◉",
+        "icon": "",
+        "icon_template": "partials/notification_icons/telegram.svg",
         "fields": [
             {"name": "telegram_bot_token", "label": "Bot Token", "type": "password", "required": True, "placeholder": ""},
             {"name": "telegram_chat_id", "label": "Chat ID", "type": "text", "required": True, "placeholder": ""},
@@ -274,7 +282,8 @@ AGENT_FIELD_CONFIGS = {
     },
     "webhook": {
         "label": "Webhook",
-        "icon": "⚡",
+        "icon": "",
+        "icon_template": "partials/notification_icons/webhook.svg",
         "fields": [
             {"name": "webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://example.com/webhook"},
         ],
@@ -282,7 +291,13 @@ AGENT_FIELD_CONFIGS = {
 }
 
 NOTIFICATION_AGENT_TABS = [
-    {"id": agent_id, "label": config["label"], "icon": config["icon"], "available": True}
+    {
+        "id": agent_id,
+        "label": config["label"],
+        "icon": config["icon"],
+        "icon_template": config.get("icon_template", ""),
+        "available": True,
+    }
     for agent_id, config in AGENT_FIELD_CONFIGS.items()
 ]
 
@@ -674,6 +689,7 @@ def agent_settings_context(settings) -> list[dict[str, object]]:
                 "id": agent_id,
                 "label": config["label"],
                 "icon": config["icon"],
+                "icon_template": config.get("icon_template", ""),
                 "available": True,
                 "enabled": enabled,
                 "configured": configured,

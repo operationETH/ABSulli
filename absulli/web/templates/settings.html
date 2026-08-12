@@ -295,7 +295,13 @@
       data-agent-tab="{{ agent.id }}"
       aria-selected="{{ 'true' if request.query_params.get('agent', 'gotify') == agent.id else 'false' }}"
     >
-      <span>{{ agent.icon }}</span>
+      <span class="agent-tab-icon" aria-hidden="true">
+        {% if agent.icon_template %}
+        {% include agent.icon_template %}
+        {% else %}
+        {{ agent.icon }}
+        {% endif %}
+      </span>
       {{ agent.label }}
       {% if agent.enabled %}<em>Enabled</em>{% elif agent.configured %}<em>Configured</em>{% endif %}
     </button>

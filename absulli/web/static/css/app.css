@@ -1529,6 +1529,21 @@ button.secondary { background: #262626; color: #ddd; border-color: #444; }
   border-color: var(--accent);
   color: #121212;
 }
+.agent-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  line-height: 1;
+}
+.agent-tab-icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
 .agent-tab.disabled {
   color: #888;
 }
