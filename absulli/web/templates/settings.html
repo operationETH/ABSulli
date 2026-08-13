@@ -351,7 +351,7 @@
       <div class="notification-events">
         <h3>Notification Events</h3>
         <div class="event-list">
-          {% for event in notification_events %}
+          {% for event in agent.notification_events %}
           <label class="event-option">
             <input type="checkbox" name="{{ event.setting }}" {% if event.enabled %}checked{% endif %}>
             <span>

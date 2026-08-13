@@ -369,17 +369,26 @@ def bool_setting(name: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def notification_events_context() -> list[dict[str, object]]:
-    return [
-        {
-            "event_type": event_type,
-            "setting": meta["setting"],
-            "label": meta["label"],
-            "description": meta["description"],
-            "enabled": bool_setting(str(meta["setting"]), bool(meta["default"])),
-        }
-        for event_type, meta in NOTIFICATION_EVENT_SETTINGS.items()
-    ]
+def notification_events_context(agent_id: str) -> list[dict[str, object]]:
+    events = []
+    for event_type, meta in NOTIFICATION_EVENT_SETTINGS.items():
+        base_setting = str(meta["setting"])
+        setting_name = f"{agent_id}_{base_setting}"
+        saved_value = setup_state.get_setup_setting(setting_name, "")
+        if saved_value == "":
+            enabled = bool_setting(base_setting, bool(meta["default"]))
+        else:
+            enabled = str(saved_value).strip().lower() in {"1", "true", "yes", "on"}
+        events.append(
+            {
+                "event_type": event_type,
+                "setting": setting_name,
+                "label": meta["label"],
+                "description": meta["description"],
+                "enabled": enabled,
+            }
+        )
+    return events
 
 def settings_field_from_env(settings, field_name: str) -> bool:
     return settings.field_configured(field_name)
@@ -695,6 +704,7 @@ def agent_settings_context(settings) -> list[dict[str, object]]:
                 "configured": configured,
                 "env_managed": env_managed,
                 "fields": fields,
+                "notification_events": notification_events_context(agent_id),
             }
         )
     return agents

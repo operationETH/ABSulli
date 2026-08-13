@@ -1253,7 +1253,6 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "api_settings": api_settings_context(settings),
             "gotify": gotify_settings_context(settings),
             "notification_agents": agent_context,
-            "notification_events": notification_events_context(),
             "settings_saved": bool(request.query_params.get("saved")),
             "settings_error": request.query_params.get("error") or "",
             "page": "settings",
@@ -1431,7 +1430,7 @@ async def settings_notification_agent_save(request: Request, agent_id: str):
     is_enabled = form.get("enabled") == "on"
 
     for meta in NOTIFICATION_EVENT_SETTINGS.values():
-        setting_name = str(meta["setting"])
+        setting_name = f"{agent_id}_{meta["setting"]}"
         values[setting_name] = "true" if form.get(setting_name) == "on" else "false"
 
     values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"

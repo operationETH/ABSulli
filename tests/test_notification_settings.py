@@ -318,26 +318,27 @@ def test_missing_agent_required_field_returns_error(monkeypatch):
     assert response.json() == {"ok": False, "message": "Slack required fields are missing."}
 
 
-def test_notification_events_are_global_and_visible_for_every_agent(monkeypatch):
+def test_notification_events_use_agent_specific_names(monkeypatch):
     client, _store = make_client(monkeypatch)
 
     response = client.get('/settings?tab=notifications')
 
     assert response.status_code == 200
-    for setting in [
-        'notify_playback_started',
-        'notify_playback_stopped',
-        'notify_abs_connection_failed',
-        'notify_abs_connection_restored',
-        'notify_new_book',
-        'notify_new_podcast',
-        'notify_new_podcast_episode',
-    ]:
-        assert response.text.count(f'name="{setting}"') == 9
+    for agent_id in ["email", "discord", "gotify", "ntfy", "pushbullet", "pushover", "slack", "telegram", "webhook"]:
+        for setting in [
+            'notify_playback_started',
+            'notify_playback_stopped',
+            'notify_abs_connection_failed',
+            'notify_abs_connection_restored',
+            'notify_new_book',
+            'notify_new_podcast',
+            'notify_new_podcast_episode',
+        ]:
+            assert response.text.count(f'name="{agent_id}_{setting}"') == 1
     assert response.text.count('Notification Events') == 9
 
 
-def test_notification_event_settings_use_global_names_when_saved_from_any_agent(monkeypatch):
+def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
     client, store = make_client(monkeypatch)
 
     response = client.post(
@@ -345,23 +346,37 @@ def test_notification_event_settings_use_global_names_when_saved_from_any_agent(
         data={
             'enabled': 'on',
             'discord_webhook_url': 'https://discord.example/webhook',
-            'notify_playback_started': 'on',
-            'notify_abs_connection_restored': 'on',
+            'discord_notify_playback_started': 'on',
+            'discord_notify_abs_connection_restored': 'on',
             'csrf_token': 'valid-token',
         },
         follow_redirects=False,
     )
 
     assert response.status_code == 303
-    assert store['notify_playback_started'] == 'true'
-    assert store['notify_playback_stopped'] == 'false'
-    assert store['notify_abs_connection_failed'] == 'false'
-    assert store['notify_abs_connection_restored'] == 'true'
-    assert store['notify_new_book'] == 'false'
-    assert store['notify_new_podcast'] == 'false'
-    assert store['notify_new_podcast_episode'] == 'false'
+    assert store['discord_notify_playback_started'] == 'true'
+    assert store['discord_notify_playback_stopped'] == 'false'
+    assert store['discord_notify_abs_connection_failed'] == 'false'
+    assert store['discord_notify_abs_connection_restored'] == 'true'
+    assert store['discord_notify_new_book'] == 'false'
+    assert store['discord_notify_new_podcast'] == 'false'
+    assert store['discord_notify_new_podcast_episode'] == 'false'
     assert 'gotify_notify_playback_started' not in store
-    assert 'gotify_notify_playback_stopped' not in store
+    assert 'notify_playback_started' not in store
+
+
+def test_notification_events_preserve_legacy_global_values_until_agent_is_saved(monkeypatch):
+    client, _store = make_client(monkeypatch, {'notify_new_book': 'true'})
+
+    response = client.get('/settings?tab=notifications')
+
+    assert response.status_code == 200
+    for agent_id in ["email", "discord", "gotify", "ntfy", "pushbullet", "pushover", "slack", "telegram", "webhook"]:
+        marker = f'name="{agent_id}_notify_new_book"'
+        start = response.text.index(marker)
+        tag_start = response.text.rfind('<input', 0, start)
+        tag_end = response.text.index('>', start)
+        assert 'checked' in response.text[tag_start:tag_end]
 
 
 def test_notification_events_default_to_unchecked(monkeypatch):
@@ -370,21 +385,22 @@ def test_notification_events_default_to_unchecked(monkeypatch):
     response = client.get('/settings?tab=notifications')
 
     assert response.status_code == 200
-    for setting in [
-        'notify_playback_started',
-        'notify_playback_stopped',
-        'notify_abs_connection_failed',
-        'notify_abs_connection_restored',
-        'notify_new_book',
-        'notify_new_podcast',
-        'notify_new_podcast_episode',
-    ]:
-        marker = f'name="{setting}"'
-        start = response.text.index(marker)
-        tag_start = response.text.rfind('<input', 0, start)
-        tag_end = response.text.index('>', start)
-        input_tag = response.text[tag_start:tag_end]
-        assert 'checked' not in input_tag
+    for agent_id in ["email", "discord", "gotify", "ntfy", "pushbullet", "pushover", "slack", "telegram", "webhook"]:
+        for setting in [
+            'notify_playback_started',
+            'notify_playback_stopped',
+            'notify_abs_connection_failed',
+            'notify_abs_connection_restored',
+            'notify_new_book',
+            'notify_new_podcast',
+            'notify_new_podcast_episode',
+        ]:
+            marker = f'name="{agent_id}_{setting}"'
+            start = response.text.index(marker)
+            tag_start = response.text.rfind('<input', 0, start)
+            tag_end = response.text.index('>', start)
+            input_tag = response.text[tag_start:tag_end]
+            assert 'checked' not in input_tag
 
 
 def test_notification_manager_defaults_all_events_disabled(monkeypatch):
@@ -402,17 +418,68 @@ def test_notification_manager_defaults_all_events_disabled(monkeypatch):
     assert event_enabled('new_podcast_episode') is False
 
 
-def test_notification_manager_returns_true_for_stored_enabled_event(monkeypatch):
-    client, _store = make_client(monkeypatch, {"notify_playback_started": "true", "notify_new_book": "true", "notify_new_podcast": "true", "notify_new_podcast_episode": "true"})
+def test_notification_manager_supports_agent_specific_events(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_playback_started': 'true',
+            'discord_notify_playback_started': 'false',
+            'discord_notify_new_book': 'true',
+        },
+    )
     assert client
 
-    from absulli.notifiers.manager import event_enabled
+    from absulli.notifiers.manager import agent_event_enabled, event_enabled
 
-    assert event_enabled("playback_start") is True
-    assert event_enabled("playback_stop") is False
-    assert event_enabled("new_book") is True
-    assert event_enabled("new_podcast") is True
-    assert event_enabled("new_podcast_episode") is True
+    assert agent_event_enabled('gotify', 'playback_start') is True
+    assert agent_event_enabled('discord', 'playback_start') is False
+    assert agent_event_enabled('discord', 'new_book') is True
+    assert event_enabled('playback_start') is True
+    assert event_enabled('new_book') is True
+    assert event_enabled('playback_stop') is False
+
+
+def test_notification_manager_sends_only_to_agents_enabled_for_event(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_new_book': 'true',
+            'discord_notify_new_book': 'false',
+        },
+    )
+    assert client
+    calls = []
+
+    class FakeAgent:
+        def __init__(self, name):
+            self.name = name
+
+        async def send(self, title, message, extra=None):
+            calls.append((self.name, title, message, extra))
+
+    class FakeDb:
+        def __init__(self):
+            self.events = []
+
+        def add(self, event):
+            self.events.append(event)
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(
+        manager,
+        'named_agents',
+        lambda: [('gotify', FakeAgent('gotify')), ('discord', FakeAgent('discord'))],
+    )
+    db = FakeDb()
+
+    asyncio.run(manager.notify(db, 'new_book', 'New book added', 'Example'))
+
+    assert calls == [('gotify', 'New book added', 'Example', {'event_type': 'new_book'})]
+    assert len(db.events) == 1
+    assert db.events[0].delivered is True
 
 
 def test_settings_general_tab_is_default(monkeypatch):
