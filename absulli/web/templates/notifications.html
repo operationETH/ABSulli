@@ -1,5 +1,50 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero"><div><h1>Notifications</h1></div></section>
-<section class="panel"><div class="panel-head"><h2>Notification Log</h2></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Type</th><th>Title</th><th>Body</th><th>Delivered</th></tr></thead><tbody>{% for row in rows %}<tr><td>{{ row.created_at|local_datetime }}</td><td>{{ row.event_type }}</td><td>{{ row.title }}</td><td>{{ row.body }}</td><td><span class="badge {{ 'good' if row.delivered else 'warn' }}">{{ row.delivered }}</span></td></tr>{% else %}<tr><td colspan="5" class="empty">No notification events yet.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="panel">
+  <div class="panel-head"><h2>Notification Log</h2></div>
+  <div class="table-wrap">
+    <table class="data-table notification-log-table">
+      <thead><tr><th>Time</th><th>Type</th><th>Title</th><th>Body</th><th>Agents</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.event.created_at|local_datetime }}</td>
+          <td>{{ row.event.event_type }}</td>
+          <td>{{ row.event.title }}</td>
+          <td>{{ row.event.body }}</td>
+          <td class="notification-agents-cell">
+            {% if row.deliveries %}
+            <div class="notification-agent-list">
+              {% for delivery in row.deliveries %}
+              <span class="notification-agent-badge {{ 'good' if delivery.delivered else 'warn' }}">
+                {{ delivery.label }}
+              </span>
+              {% endfor %}
+            </div>
+            {% set failed_deliveries = row.deliveries|selectattr('error')|list %}
+            {% if failed_deliveries %}
+            <details class="notification-error-details">
+              <summary>Details</summary>
+              <div class="notification-error-list">
+                {% for delivery in failed_deliveries %}
+                <div class="notification-delivery-error"><strong>{{ delivery.label }}</strong><span>{{ delivery.error }}</span></div>
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+            {% else %}
+            <span class="notification-agent-badge legacy {{ 'good' if row.event.delivered else 'warn' }}">
+              {{ 'Delivered' if row.event.delivered else 'Failed' }}
+            </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No notification events yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}

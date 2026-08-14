@@ -21,7 +21,7 @@ from absulli.core.cover_cache import (
     write_cover_cache,
     write_negative_cover_cache,
 )
-from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationEvent
+from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent
 from absulli.database.session import get_db
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.scheduler import AbsulliScheduler
@@ -1494,7 +1494,39 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
     return {"ok": True, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test notification sent."}
 
 
+
+def clean_notification_error(value: object) -> str:
+    error = str(value or "").strip()
+    if not error:
+        return ""
+    first_line = error.splitlines()[0].strip()
+    first_line = re.sub(r"""\s+for url ['"].*?['"]\s*$""", "", first_line, flags=re.IGNORECASE)
+    first_line = re.sub(r"https?://\S+", "[redacted URL]", first_line)
+    if len(first_line) > 180:
+        first_line = first_line[:177].rstrip() + "..."
+    return first_line
+
+
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications(request: Request, db: Session = Depends(get_db)):
-    rows = db.query(NotificationEvent).order_by(desc(NotificationEvent.created_at)).limit(200).all()
+    events = db.query(NotificationEvent).order_by(desc(NotificationEvent.created_at)).limit(200).all()
+    event_ids = [event.id for event in events]
+    delivery_map = {}
+    if event_ids:
+        deliveries = (
+            db.query(NotificationDelivery)
+            .filter(NotificationDelivery.event_id.in_(event_ids))
+            .order_by(NotificationDelivery.id)
+            .all()
+        )
+        for delivery in deliveries:
+            delivery_map.setdefault(delivery.event_id, []).append(
+                {
+                    "agent": delivery.agent,
+                    "label": AGENT_FIELD_CONFIGS.get(delivery.agent, {}).get("label", delivery.agent),
+                    "delivered": delivery.delivered,
+                    "error": clean_notification_error(delivery.error),
+                }
+            )
+    rows = [{"event": event, "deliveries": delivery_map.get(event.id, [])} for event in events]
     return templates.TemplateResponse(request, "notifications.html", {"rows": rows, "page": "notifications"})

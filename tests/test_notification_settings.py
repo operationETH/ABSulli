@@ -7,6 +7,7 @@ import absulli.core.setup_state as setup_state
 import absulli.web.routes as web_routes
 import absulli.web.settings as web_settings
 from absulli.core.config import Settings, get_settings
+from absulli.database.models import NotificationDelivery, NotificationEvent
 from absulli.notifiers.manager import NotificationManager
 from absulli.web.routes import router as web_router
 
@@ -460,9 +461,14 @@ def test_notification_manager_sends_only_to_agents_enabled_for_event(monkeypatch
     class FakeDb:
         def __init__(self):
             self.events = []
+            self.deliveries = []
 
-        def add(self, event):
-            self.events.append(event)
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+                self.events.append(record)
+            if isinstance(record, NotificationDelivery):
+                self.deliveries.append(record)
 
         def commit(self):
             pass
@@ -480,6 +486,72 @@ def test_notification_manager_sends_only_to_agents_enabled_for_event(monkeypatch
     assert calls == [('gotify', 'New book added', 'Example', {'event_type': 'new_book'})]
     assert len(db.events) == 1
     assert db.events[0].delivered is True
+    assert len(db.deliveries) == 1
+    assert db.deliveries[0].event_id == 42
+    assert db.deliveries[0].agent == 'gotify'
+    assert db.deliveries[0].delivered is True
+    assert db.deliveries[0].error == ''
+
+
+def test_notification_manager_records_delivery_status_per_agent(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_new_book': 'true',
+            'discord_notify_new_book': 'true',
+        },
+    )
+    assert client
+
+    class FakeAgent:
+        def __init__(self, error=''):
+            self.error = error
+
+        async def send(self, title, message, extra=None):
+            if self.error:
+                raise RuntimeError(self.error)
+
+    class FakeDb:
+        def __init__(self):
+            self.events = []
+            self.deliveries = []
+
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+                self.events.append(record)
+            if isinstance(record, NotificationDelivery):
+                self.deliveries.append(record)
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(
+        manager,
+        'named_agents',
+        lambda: [
+            ('gotify', FakeAgent()),
+            ('discord', FakeAgent('Discord rejected the webhook')),
+        ],
+    )
+    db = FakeDb()
+
+    asyncio.run(manager.notify(db, 'new_book', 'New book added', 'Example'))
+
+    assert len(db.events) == 1
+    assert db.events[0].delivered is True
+    assert len(db.deliveries) == 2
+
+    gotify = next(delivery for delivery in db.deliveries if delivery.agent == 'gotify')
+    discord = next(delivery for delivery in db.deliveries if delivery.agent == 'discord')
+
+    assert gotify.event_id == 42
+    assert gotify.delivered is True
+    assert gotify.error == ''
+    assert discord.event_id == 42
+    assert discord.delivered is False
+    assert discord.error == 'Discord rejected the webhook'
 
 
 def test_settings_general_tab_is_default(monkeypatch):

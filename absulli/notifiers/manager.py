@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from absulli.core.config import Settings
 import absulli.core.setup_state as setup_state
-from absulli.database.models import NotificationEvent
+from absulli.database.models import NotificationDelivery, NotificationEvent
 from absulli.notifiers.agents import DiscordAgent, EmailAgent, GotifyAgent, NtfyAgent, PushbulletAgent, PushoverAgent, SlackAgent, TelegramAgent, WebhookAgent
 
 log = logging.getLogger(__name__)
@@ -142,7 +142,7 @@ class NotificationManager:
 
     async def notify(self, db: Session, event_type: str, title: str, body: str) -> None:
         agents = [
-            agent
+            (agent_id, agent)
             for agent_id, agent in self.named_agents()
             if agent_event_enabled(agent_id, event_type)
         ]
@@ -153,11 +153,15 @@ class NotificationManager:
         db.add(event)
         db.commit()
         delivered = False
-        for agent in agents:
+        for agent_id, agent in agents:
+            delivery = NotificationDelivery(event_id=event.id, agent=agent_id, delivered=False, error="")
             try:
                 await agent.send(title, body, {"event_type": event_type})
+                delivery.delivered = True
                 delivered = True
             except Exception as exc:
+                delivery.error = str(exc)
                 log.warning("Notification agent failed: %s", exc)
+            db.add(delivery)
         event.delivered = delivered
         db.commit()

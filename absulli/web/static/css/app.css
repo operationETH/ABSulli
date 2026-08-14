@@ -517,6 +517,54 @@ button.secondary { background: #262626; color: #ddd; border-color: #444; }
 .badge { display: inline-flex; align-items: center; border: 1px solid #444; background: #222; color: #aaa; border-radius: 2px; padding: 5px 9px; }
 .badge.good { border-color: #425833; color: #b5df8a; }
 .badge.warn { border-color: var(--accent); color: var(--accent); }
+
+.notification-log-table th:last-child,
+.notification-log-table td:last-child { width: 31%; }
+.notification-agents-cell { min-width: 260px; }
+.notification-agent-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.notification-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #444;
+  border-radius: 2px;
+  padding: 4px 7px;
+  background: #222;
+  color: #bbb;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.notification-agent-badge.good { border-color: #425833; color: #b5df8a; }
+.notification-agent-badge.warn { border-color: #6a3333; color: #e08a8a; }
+.notification-agent-badge.legacy { color: #aaa; }
+.notification-error-details { margin-top: 7px; max-width: 520px; }
+.notification-error-details summary {
+  display: inline-block;
+  color: #aaa;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.notification-error-details summary:hover { color: #ddd; }
+.notification-error-details summary::marker { display: none; }
+.notification-error-list {
+  margin-top: 7px;
+  padding: 7px 9px;
+  border-left: 2px solid #735c25;
+  background: rgba(0, 0, 0, .14);
+}
+.notification-delivery-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.notification-delivery-error + .notification-delivery-error { margin-top: 5px; }
+.notification-delivery-error strong { color: #c7c7c7; }
+.notification-delivery-error span { overflow-wrap: anywhere; }
 .footer-note { color: #777; margin-top: 22px; font-size: 12px; }
 
 @media (max-width: 1200px) {

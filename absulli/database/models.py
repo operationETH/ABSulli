@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from absulli.core.time import utcnow
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -152,3 +152,14 @@ class NotificationEvent(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("notification_events.id"), index=True)
+    agent: Mapped[str] = mapped_column(String(64), index=True)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    attempted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
