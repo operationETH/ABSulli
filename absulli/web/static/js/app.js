@@ -692,6 +692,13 @@ async function copyTextToClipboard(value) {
   if (!copied) throw new Error('Copy command failed');
 }
 
+document.addEventListener('submit', (event) => {
+  const form = event.target.closest('[data-notification-clear]');
+  if (form && !window.confirm('Clear all notification log entries? This cannot be undone.')) {
+    event.preventDefault();
+  }
+});
+
 document.addEventListener('click', async (event) => {
   const absToggle = event.target.closest('[data-abs-api-key-toggle]');
   if (absToggle) {

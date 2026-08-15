@@ -6,7 +6,7 @@ from urllib.parse import quote, urlencode
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from sqlalchemy import desc, func, or_
+from sqlalchemy import and_, desc, exists, func, or_
 from sqlalchemy.orm import Session
 
 from absulli import __version__
@@ -23,6 +23,7 @@ from absulli.core.cover_cache import (
 )
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent
 from absulli.database.session import get_db
+from absulli.notifiers.manager import clean_notification_error
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.core.security import (
@@ -1488,28 +1489,77 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
             {"event_type": "test"},
         )
     except Exception as exc:
-        log.warning("%s test notification failed: %s", AGENT_FIELD_CONFIGS[agent_id]["label"], exc)
+        log.warning("%s test notification failed: %s", AGENT_FIELD_CONFIGS[agent_id]["label"], clean_notification_error(exc))
         return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test failed. Check the settings and network."}, status_code=502)
 
     return {"ok": True, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test notification sent."}
 
 
 
-def clean_notification_error(value: object) -> str:
-    error = str(value or "").strip()
-    if not error:
-        return ""
-    first_line = error.splitlines()[0].strip()
-    first_line = re.sub(r"""\s+for url ['"].*?['"]\s*$""", "", first_line, flags=re.IGNORECASE)
-    first_line = re.sub(r"https?://\S+", "[redacted URL]", first_line)
-    if len(first_line) > 180:
-        first_line = first_line[:177].rstrip() + "..."
-    return first_line
-
-
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications(request: Request, db: Session = Depends(get_db)):
-    events = db.query(NotificationEvent).order_by(desc(NotificationEvent.created_at)).limit(200).all()
+    limit = history_page_size(request)
+    selected_type = (request.query_params.get("type") or "").strip()
+    selected_agent = (request.query_params.get("agent") or "").strip()
+    selected_status = (request.query_params.get("status") or "").strip().lower()
+    if selected_status not in {"delivered", "failed"}:
+        selected_status = ""
+
+    event_query = db.query(NotificationEvent)
+    if selected_type:
+        event_query = event_query.filter(NotificationEvent.event_type == selected_type)
+
+    matching_delivery = exists().where(NotificationDelivery.event_id == NotificationEvent.id)
+    failed_delivery = exists().where(
+        and_(
+            NotificationDelivery.event_id == NotificationEvent.id,
+            NotificationDelivery.delivered.is_(False),
+        )
+    )
+
+    if selected_agent:
+        agent_delivery = exists().where(
+            and_(
+                NotificationDelivery.event_id == NotificationEvent.id,
+                NotificationDelivery.agent == selected_agent,
+            )
+        )
+        event_query = event_query.filter(agent_delivery)
+        if selected_status:
+            agent_status = exists().where(
+                and_(
+                    NotificationDelivery.event_id == NotificationEvent.id,
+                    NotificationDelivery.agent == selected_agent,
+                    NotificationDelivery.delivered.is_(selected_status == "delivered"),
+                )
+            )
+            event_query = event_query.filter(agent_status)
+    elif selected_status == "failed":
+        event_query = event_query.filter(
+            or_(
+                failed_delivery,
+                and_(~matching_delivery, NotificationEvent.delivered.is_(False)),
+            )
+        )
+    elif selected_status == "delivered":
+        event_query = event_query.filter(
+            or_(
+                and_(matching_delivery, ~failed_delivery),
+                and_(~matching_delivery, NotificationEvent.delivered.is_(True)),
+            )
+        )
+
+    total = event_query.count()
+    pagination = pagination_context(request, total, limit, "notification entries")
+    current_page = pagination["pagination"]["current_page"]
+    events = (
+        event_query
+        .order_by(desc(NotificationEvent.created_at), desc(NotificationEvent.id))
+        .offset(query_offset(current_page, limit))
+        .limit(limit)
+        .all()
+    )
+
     event_ids = [event.id for event in events]
     delivery_map = {}
     if event_ids:
@@ -1528,5 +1578,57 @@ def notifications(request: Request, db: Session = Depends(get_db)):
                     "error": clean_notification_error(delivery.error),
                 }
             )
+
+    type_values = [value for value, in db.query(NotificationEvent.event_type).distinct().order_by(NotificationEvent.event_type).all()]
+    type_options = [
+        {
+            "value": value,
+            "label": NOTIFICATION_EVENT_SETTINGS.get(value, {}).get("label", value.replace("_", " ").title()),
+        }
+        for value in type_values
+    ]
+    agent_values = [value for value, in db.query(NotificationDelivery.agent).distinct().order_by(NotificationDelivery.agent).all()]
+    agent_options = [
+        {
+            "value": value,
+            "label": AGENT_FIELD_CONFIGS.get(value, {}).get("label", value),
+        }
+        for value in agent_values
+    ]
     rows = [{"event": event, "deliveries": delivery_map.get(event.id, [])} for event in events]
-    return templates.TemplateResponse(request, "notifications.html", {"rows": rows, "page": "notifications"})
+    notification_log_has_entries = db.query(NotificationEvent.id).first() is not None
+    context = {
+        "rows": rows,
+        "page": "notifications",
+        "type_options": type_options,
+        "agent_options": agent_options,
+        "selected_type": selected_type,
+        "selected_agent": selected_agent,
+        "selected_status": selected_status,
+        "notification_log_has_entries": notification_log_has_entries,
+        "history_page_size_hidden_params": [
+            (name, value)
+            for name, value in (("type", selected_type), ("agent", selected_agent), ("status", selected_status))
+            if value
+        ],
+    }
+    csrf_token = create_csrf_token()
+    context["csrf_token"] = csrf_token
+    context.update(history_page_size_context(limit))
+    context.update(pagination)
+    response = templates.TemplateResponse(request, "notifications.html", context)
+    set_csrf_cookie(response, csrf_token)
+    return response
+
+
+@router.post("/notifications/clear", response_class=HTMLResponse)
+async def notifications_clear(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your notification log form expired. Refresh and try again.")
+
+    db.query(NotificationDelivery).delete(synchronize_session=False)
+    db.query(NotificationEvent).delete(synchronize_session=False)
+    db.commit()
+    return RedirectResponse("/notifications", status_code=303)

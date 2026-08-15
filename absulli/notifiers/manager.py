@@ -1,4 +1,5 @@
 import logging
+import re
 from sqlalchemy.orm import Session
 
 from absulli.core.config import Settings
@@ -43,6 +44,18 @@ NOTIFICATION_AGENT_IDS = (
 
 def _bool_value(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def clean_notification_error(value: object) -> str:
+    error = str(value or "").strip()
+    if not error:
+        return ""
+    first_line = error.splitlines()[0].strip()
+    first_line = re.sub(r"""\s+for url ['"].*?['"]\s*$""", "", first_line, flags=re.IGNORECASE)
+    first_line = re.sub(r"https?://\S+", "[redacted URL]", first_line)
+    if len(first_line) > 180:
+        first_line = first_line[:177].rstrip() + "..."
+    return first_line
 
 
 def agent_event_enabled(agent_id: str, event_type: str) -> bool:
@@ -160,8 +173,8 @@ class NotificationManager:
                 delivery.delivered = True
                 delivered = True
             except Exception as exc:
-                delivery.error = str(exc)
-                log.warning("Notification agent failed: %s", exc)
+                delivery.error = clean_notification_error(exc)
+                log.warning("Notification agent failed: %s", clean_notification_error(exc))
             db.add(delivery)
         event.delivered = delivered
         db.commit()

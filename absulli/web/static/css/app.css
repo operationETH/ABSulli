@@ -565,6 +565,26 @@ button.secondary { background: #262626; color: #ddd; border-color: #444; }
 .notification-delivery-error + .notification-delivery-error { margin-top: 5px; }
 .notification-delivery-error strong { color: #c7c7c7; }
 .notification-delivery-error span { overflow-wrap: anywhere; }
+.notification-clear-form { margin: 0; }
+.notification-clear-button {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #3f3f3f;
+  border-radius: 4px;
+  background: #222;
+  color: #ddd;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.notification-clear-button:hover {
+  background: #303030;
+  color: #fff;
+}
+.notification-clear-button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
 .footer-note { color: #777; margin-top: 22px; font-size: 12px; }
 
 @media (max-width: 1200px) {
@@ -2232,5 +2252,133 @@ a.version-status-badge:hover { filter: brightness(1.12); }
 @media (max-width: 720px) {
   .settings-page .abs-api-key-input-group {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+.notification-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+@media (max-width: 760px) {
+  .notification-log-panel .panel-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .notification-log-panel .panel-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+  .notification-log-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+  }
+  .notification-filter-group {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+  .notification-filter-group label {
+    font-size: 12px;
+    color: #aaa;
+  }
+  .notification-filter-group select {
+    width: 100%;
+    min-width: 0;
+  }
+  .notification-log-panel .panel-actions > .history-page-size:not(.notification-log-filters) {
+    display: grid;
+    grid-template-columns: auto minmax(76px, 96px) 1fr;
+    justify-content: start;
+    width: 100%;
+    gap: 7px;
+  }
+  .notification-log-panel .table-wrap {
+    overflow: visible;
+  }
+  .notification-log-table,
+  .notification-log-table tbody,
+  .notification-log-table tr,
+  .notification-log-table td {
+    display: block;
+    width: 100%;
+  }
+  .notification-log-table thead {
+    display: none;
+  }
+  .notification-log-table tr {
+    padding: 10px 14px;
+    border-bottom: 1px solid #3a3a3a;
+  }
+  .notification-log-table td {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 10px;
+    padding: 5px 0;
+    border: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .notification-log-table td::before {
+    color: #888;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .notification-log-table td:nth-child(1)::before { content: "Time"; }
+  .notification-log-table td:nth-child(2)::before { content: "Type"; }
+  .notification-log-table td:nth-child(3)::before { content: "Title"; }
+  .notification-log-table td:nth-child(4)::before { content: "Body"; }
+  .notification-log-table td:nth-child(5)::before { content: "Agents"; }
+  .notification-log-table th:last-child,
+  .notification-log-table td:last-child {
+    width: 100%;
+  }
+  .notification-agents-cell {
+    min-width: 0;
+  }
+  .notification-agent-list {
+    gap: 5px;
+  }
+  .notification-error-details {
+    grid-column: 2 / -1;
+    width: 100%;
+    min-width: 0;
+    margin-top: 5px;
+    max-width: 100%;
+  }
+  .notification-error-list {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .notification-delivery-error {
+    grid-template-columns: max-content minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .notification-delivery-error span {
+    min-width: 0;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+  .notification-clear-form {
+    justify-self: start;
+  }
+  .notification-log-panel .pagination-bar {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  .notification-log-filters {
+    grid-template-columns: 1fr;
   }
 }

@@ -603,3 +603,32 @@ def test_settings_tabs_render_network_users_and_about_sections(monkeypatch):
     assert 'Database Path' in about.text
     assert 'Migration Version' in about.text
     assert 'Migrations' not in about.text
+
+
+def test_notification_agent_failure_log_redacts_secret_url(monkeypatch, caplog):
+    client, _store = make_client(monkeypatch)
+
+    class FakeDiscordAgent:
+        def __init__(self, webhook_url):
+            self.webhook_url = webhook_url
+
+        async def send(self, title, message, extra=None):
+            raise RuntimeError(
+                "Client error '401 Unauthorized' for url "
+                "'https://discord.com/api/webhooks/123/secret-token'"
+            )
+
+    monkeypatch.setattr(web_settings, "DiscordAgent", FakeDiscordAgent)
+
+    response = client.post(
+        "/settings/notifications/discord/test",
+        data={
+            "enabled": "on",
+            "discord_webhook_url": "https://discord.com/api/webhooks/123/secret-token",
+            "csrf_token": "valid-token",
+        },
+    )
+
+    assert response.status_code == 502
+    assert "401 Unauthorized" in caplog.text
+    assert "secret-token" not in caplog.text
