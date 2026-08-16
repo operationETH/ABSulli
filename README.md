@@ -8,7 +8,7 @@
   <a href="https://hub.docker.com/r/operationeth/absulli"><img alt="Docker Hub Pulls" src="https://img.shields.io/docker/pulls/operationeth/absulli?label=Docker%20Hub%20pulls&logo=docker"></a>
   <a href="https://github.com/operationETH/ABSulli/pkgs/container/absulli"><img alt="GHCR Pulls" src="https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/operationETH/ABSulli/absulli&query=downloadCount&label=GHCR%20pulls&logo=github&color=blue"></a>
   <a href="https://ca.unraid.net/apps/absulli-08kx2l31cthp3f"><img alt="Unraid Community Apps" src="https://img.shields.io/badge/Unraid-Community%20Apps-F15A2C?logo=unraid&logoColor=white"></a>
-  <a href="https://discord.gg/qvVyfjBuwv"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white"></a></p>
+  <a href="https://discord.gg/qvVyfjBuwv"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white"></a>
 </p>
 
 ---
@@ -179,4 +179,3 @@ ABSulli ships with the following enabled by default:
 Authentication is required after setup and recommended for all installs.
 
 ---
-
