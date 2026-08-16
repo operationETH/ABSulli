@@ -213,3 +213,28 @@ def test_find_author_in_libraries_matches_supported_payload_shapes(monkeypatch):
     result = asyncio.run(client.find_author_in_libraries(" jane author ", ["lib-1", "lib-2"]))
 
     assert result == {"id": "a2", "displayName": "Jane Author"}
+
+
+def test_get_item_sends_expanded_param(monkeypatch):
+    calls = []
+
+    class FakeAsyncClient:
+        is_closed = False
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            return FakeResponse(payload={"id": "podcast-1"})
+
+        async def aclose(self):
+            self.is_closed = True
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    client = AudiobookshelfClient(make_settings())
+    result = asyncio.run(client.get_item("podcast-1", expanded=True))
+
+    assert result == {"id": "podcast-1"}
+    assert calls == [("/api/items/podcast-1", {"params": {"expanded": 1}})]

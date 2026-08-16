@@ -672,3 +672,194 @@ function initializeNotificationAgentTabs(root = document) {
 }
 
 initializeNotificationAgentTabs();
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  if (!copied) throw new Error('Copy command failed');
+}
+
+document.addEventListener('submit', (event) => {
+  const form = event.target.closest('[data-notification-clear]');
+  if (form && !window.confirm('Clear all notification log entries? This cannot be undone.')) {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener('click', async (event) => {
+  const absToggle = event.target.closest('[data-abs-api-key-toggle]');
+  if (absToggle) {
+    const input = document.getElementById('abs-api-key');
+    if (!input) return;
+    const fromEnv = input.dataset.absApiKeyFromEnv === 'true';
+    if (fromEnv) {
+      const masked = input.dataset.absApiKeyMasked !== 'false';
+      const nextMasked = !masked;
+      input.value = nextMasked ? 'Configured via .env read only' : (input.dataset.absApiKeyValue || '');
+      input.dataset.absApiKeyMasked = nextMasked ? 'true' : 'false';
+    } else {
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+    }
+    const masked = fromEnv ? input.dataset.absApiKeyMasked !== 'false' : input.type === 'password';
+    const showIcon = absToggle.querySelector('.abs-api-key-icon-show');
+    const hideIcon = absToggle.querySelector('.abs-api-key-icon-hide');
+    if (showIcon) showIcon.hidden = !masked;
+    if (hideIcon) hideIcon.hidden = masked;
+    const label = masked ? 'Show Audiobookshelf API key' : 'Hide Audiobookshelf API key';
+    absToggle.setAttribute('aria-label', label);
+    absToggle.setAttribute('title', label);
+    return;
+  }
+
+  const absCopy = event.target.closest('[data-abs-api-key-copy]');
+  if (absCopy) {
+    const input = document.getElementById('abs-api-key');
+    const status = document.getElementById('abs-api-key-copy-status');
+    if (!input) return;
+    const value = input.dataset.absApiKeyFromEnv === 'true' ? (input.dataset.absApiKeyValue || '') : input.value;
+    try {
+      await copyTextToClipboard(value);
+      if (status) status.textContent = 'Copied.';
+    } catch {
+      if (status) status.textContent = 'Copy failed.';
+    }
+    if (status) {
+      status.hidden = false;
+      window.setTimeout(() => { status.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  const toggle = event.target.closest('[data-api-key-toggle]');
+  if (toggle) {
+    const input = document.getElementById('absulli-api-key');
+    if (!input) return;
+    const masked = input.dataset.apiKeyMasked !== 'false';
+    const nextMasked = !masked;
+    input.value = nextMasked ? '•'.repeat(48) : (input.dataset.apiKeyValue || '');
+    input.dataset.apiKeyMasked = nextMasked ? 'true' : 'false';
+    const showIcon = toggle.querySelector('.api-key-icon-show');
+    const hideIcon = toggle.querySelector('.api-key-icon-hide');
+    if (showIcon) showIcon.hidden = !nextMasked;
+    if (hideIcon) hideIcon.hidden = nextMasked;
+    const label = nextMasked ? 'Show API key' : 'Hide API key';
+    toggle.setAttribute('aria-label', label);
+    toggle.setAttribute('title', label);
+    return;
+  }
+
+  const copy = event.target.closest('[data-api-key-copy]');
+  if (copy) {
+    const input = document.getElementById('absulli-api-key');
+    const status = document.getElementById('api-key-copy-status');
+    if (!input) return;
+    try {
+      await copyTextToClipboard(input.dataset.apiKeyValue || '');
+      if (status) status.textContent = 'Copied.';
+    } catch {
+      if (status) status.textContent = 'Copy failed.';
+    }
+    if (status) {
+      status.hidden = false;
+      window.setTimeout(() => { status.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  const regenerate = event.target.closest('[data-api-key-regenerate]');
+  if (regenerate && !window.confirm('Regenerate the API key? Applications using the current key will stop working.')) {
+    event.preventDefault();
+    return;
+  }
+
+  const metricsToggle = event.target.closest('[data-metrics-token-toggle]');
+  if (metricsToggle) {
+    const input = document.getElementById('metrics-token');
+    if (!input) return;
+    const fromEnv = input.dataset.metricsTokenFromEnv === 'true';
+    if (fromEnv) {
+      const masked = input.dataset.metricsTokenMasked !== 'false';
+      const nextMasked = !masked;
+      input.value = nextMasked ? 'Configured via .env read only' : (input.dataset.metricsTokenValue || '');
+      input.dataset.metricsTokenMasked = nextMasked ? 'true' : 'false';
+      const showIcon = metricsToggle.querySelector('.metrics-token-icon-show');
+      const hideIcon = metricsToggle.querySelector('.metrics-token-icon-hide');
+      if (showIcon) showIcon.hidden = !nextMasked;
+      if (hideIcon) hideIcon.hidden = nextMasked;
+      const label = nextMasked ? 'Show metrics token' : 'Hide metrics token';
+      metricsToggle.setAttribute('aria-label', label);
+      metricsToggle.setAttribute('title', label);
+      return;
+    }
+    if (!input.value) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    const showIcon = metricsToggle.querySelector('.metrics-token-icon-show');
+    const hideIcon = metricsToggle.querySelector('.metrics-token-icon-hide');
+    if (showIcon) showIcon.hidden = !showing;
+    if (hideIcon) hideIcon.hidden = showing;
+    const label = showing ? 'Show metrics token' : 'Hide metrics token';
+    metricsToggle.setAttribute('aria-label', label);
+    metricsToggle.setAttribute('title', label);
+    return;
+  }
+
+  const metricsCopy = event.target.closest('[data-metrics-token-copy]');
+  if (metricsCopy) {
+    const input = document.getElementById('metrics-token');
+    const status = document.getElementById('metrics-token-copy-status');
+    if (!input) return;
+    const value = input.dataset.metricsTokenFromEnv === 'true' ? (input.dataset.metricsTokenValue || '') : input.value;
+    if (!value) return;
+    try {
+      await copyTextToClipboard(value);
+      if (status) status.textContent = 'Copied.';
+    } catch {
+      if (status) status.textContent = 'Copy failed.';
+    }
+    if (status) {
+      status.hidden = false;
+      window.setTimeout(() => { status.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  const metricsRegenerate = event.target.closest('[data-metrics-token-regenerate]');
+  if (metricsRegenerate && !window.confirm('Regenerate the metrics token? Prometheus clients using the current token will stop working.')) {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener('input', (event) => {
+  if (event.target.id !== 'metrics-token') return;
+  const hasValue = Boolean(event.target.value);
+  const toggle = document.querySelector('[data-metrics-token-toggle]');
+  const copy = document.querySelector('[data-metrics-token-copy]');
+  if (toggle) toggle.disabled = !hasValue;
+  if (copy) copy.disabled = !hasValue;
+  if (!hasValue) {
+    event.target.type = 'password';
+    const showIcon = toggle?.querySelector('.metrics-token-icon-show');
+    const hideIcon = toggle?.querySelector('.metrics-token-icon-hide');
+    if (showIcon) showIcon.hidden = false;
+    if (hideIcon) hideIcon.hidden = true;
+    if (toggle) {
+      toggle.setAttribute('aria-label', 'Show metrics token');
+      toggle.setAttribute('title', 'Show metrics token');
+    }
+  }
+});

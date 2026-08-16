@@ -30,12 +30,17 @@ def make_client(monkeypatch, store=None):
     def fake_get(key, default=""):
         return store.get(key, default)
 
+    def fake_set(key, value):
+        store[key] = value
+
     def fake_set_many(values):
         store.update(values)
 
     monkeypatch.setattr(web_routes, "get_setup_setting", fake_get)
+    monkeypatch.setattr(web_routes, "set_setup_setting", fake_set)
     monkeypatch.setattr(web_routes, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(setup_state, "get_setup_setting", fake_get)
+    monkeypatch.setattr(setup_state, "set_setup_setting", fake_set)
     monkeypatch.setattr(setup_state, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
 
@@ -63,7 +68,11 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert 'name="trust_proxy" checked' in response.text
     assert "HTTPS Secure Cookies" in response.text
     assert "Metrics Token" in response.text
-    assert "Configured — leave blank to keep" in response.text
+    assert 'id="metrics-token"' in response.text
+    assert 'value="stored-token"' in response.text
+    assert 'data-metrics-token-toggle' in response.text
+    assert 'data-metrics-token-copy' in response.text
+    assert 'data-metrics-token-regenerate' in response.text
     assert "HSTS Header" in response.text
     assert "CORS Allowed Origins" in response.text
     assert "Restart Required" in response.text
@@ -75,7 +84,7 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert "CORS Allowed Headers" not in response.text
 
 
-def test_network_settings_save_persists_simple_values_and_keeps_blank_metrics_token(monkeypatch):
+def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_token(monkeypatch):
     client, store = make_client(monkeypatch, {"metrics_token": "saved-token"})
 
     response = client.post(
@@ -93,7 +102,7 @@ def test_network_settings_save_persists_simple_values_and_keeps_blank_metrics_to
     assert response.headers["location"] == "/settings?tab=network&saved=network"
     assert store["trust_proxy"] == "true"
     assert store["cookie_secure"] == "true"
-    assert store["metrics_token"] == "saved-token"
+    assert store["metrics_token"] == ""
     assert store["security_hsts_enabled"] == "false"
     assert store["cors_allowed_origins"] == ""
     assert "security_hsts_max_age_seconds" not in store
@@ -127,7 +136,12 @@ def test_network_settings_env_values_win_over_saved_settings(monkeypatch):
 
     page = client.get("/settings?tab=network")
     assert page.status_code == 200
-    assert "Managed by .env" in page.text
+    assert 'value="Configured via .env read only"' in page.text
+    assert 'data-metrics-token-value="env-token"' in page.text
+    assert 'data-metrics-token-toggle aria-label="Show metrics token" title="Show metrics token"' in page.text
+    assert 'data-metrics-token-copy aria-label="Copy metrics token" title="Copy metrics token"' in page.text
+    assert 'data-metrics-token-regenerate' not in page.text
+    assert "Configured via .env</em>" not in page.text
 
     response = client.post(
         "/settings/network",
@@ -235,6 +249,7 @@ def test_cors_and_hsts_detail_settings_use_defaults_unless_env_overrides(monkeyp
     assert settings.cors_allowed_headers_list == [
         "Authorization",
         "Content-Type",
+        "X-API-Key",
         "X-Absulli-Api-Token",
         "X-Absulli-Metrics-Token",
         "X-CSRF-Token",
@@ -259,3 +274,32 @@ def test_cors_and_hsts_detail_settings_use_defaults_unless_env_overrides(monkeyp
     assert settings.effective_security_hsts_max_age_seconds == 123
     assert settings.effective_security_hsts_include_subdomains is False
     assert settings.effective_security_hsts_preload is True
+
+def test_network_settings_metrics_token_defaults_disabled(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=network")
+
+    assert response.status_code == 200
+    assert 'id="metrics-token"' in response.text
+    assert 'value=""' in response.text
+    assert 'data-metrics-token-toggle' in response.text
+    assert 'data-metrics-token-copy' in response.text
+    assert 'data-metrics-token-toggle aria-label="Show metrics token" title="Show metrics token" disabled' in response.text
+    assert 'data-metrics-token-copy aria-label="Copy metrics token" title="Copy metrics token" disabled' in response.text
+
+
+def test_network_settings_regenerates_metrics_token(monkeypatch):
+    client, store = make_client(monkeypatch)
+
+    response = client.post(
+        "/settings/network/metrics-token/regenerate",
+        data={"csrf_token": "valid-token"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings?tab=network&saved=network"
+    assert store["metrics_token"]
+    assert store["metrics_token"] != "change_me"
+

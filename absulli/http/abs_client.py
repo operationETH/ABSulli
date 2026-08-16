@@ -221,6 +221,10 @@ class AudiobookshelfClient:
             params={"limit": limit, "page": page, "sort": "addedAt", "desc": 1},
         )
 
+    async def get_item(self, item_id: str, expanded: bool = False) -> dict[str, Any]:
+        params = {"expanded": 1} if expanded else None
+        return await self._get(f"/api/items/{item_id}", params=params)
+
     async def get_user_listening_sessions(
         self,
         user_id: str,

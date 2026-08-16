@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import sys
 from urllib.parse import quote
 
@@ -29,7 +30,7 @@ HISTORY_PAGE_SIZE_OPTIONS = (10, 25, 50, 100)
 HISTORY_PAGE_SIZE_SETTING = "history_page_size"
 DEFAULT_HISTORY_PAGE_SIZE = 25
 
-SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "about")
+SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "api", "about")
 
 
 def clean_settings_tab(value: object) -> str:
@@ -43,6 +44,7 @@ def settings_tab_context(active_tab: str) -> list[dict[str, str]]:
         "network": "Network",
         "users": "Users",
         "notifications": "Notifications",
+        "api": "API",
         "about": "About",
     }
     return [{"id": tab_id, "label": labels[tab_id]} for tab_id in SETTINGS_TAB_IDS]
@@ -125,11 +127,29 @@ NOTIFICATION_EVENT_SETTINGS = {
         "description": "Send when Audiobookshelf starts responding again.",
         "default": False,
     },
+    "new_book": {
+        "setting": "notify_new_book",
+        "label": "New Book Added",
+        "description": "Send when ABSulli detects a new book after the initial library scan.",
+        "default": False,
+    },
+    "new_podcast": {
+        "setting": "notify_new_podcast",
+        "label": "New Podcast Added",
+        "description": "Send when ABSulli detects a new podcast after the initial library scan.",
+        "default": False,
+    },
+    "new_podcast_episode": {
+        "setting": "notify_new_podcast_episode",
+        "label": "New Podcast Episode Added",
+        "description": "Send when ABSulli detects a newly downloaded podcast episode after the initial episode scan.",
+        "default": False,
+    },
 }
 
 GENERAL_FIELD_CONFIGS = [
     {"name": "abs_url", "label": "Audiobookshelf URL", "type": "url", "required": True, "placeholder": "http://audiobookshelf:13378"},
-    {"name": "abs_api_key", "label": "Audiobookshelf API Key", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+    {"name": "abs_api_key", "label": "Audiobookshelf API Key", "type": "password", "required": True, "placeholder": ""},
     {"name": "abs_verify_ssl", "label": "Verify SSL Certificates", "type": "checkbox", "required": False, "default": True},
     {"name": "abs_request_timeout", "label": "Request Timeout", "type": "number", "required": True, "placeholder": "15"},
     {"name": "abs_poll_interval", "label": "Activity Poll Interval", "type": "number", "required": True, "placeholder": "15"},
@@ -163,9 +183,9 @@ NETWORK_FIELD_CONFIGS = [
     {
         "name": "metrics_token",
         "label": "Metrics Token",
-        "description": "Optional token required for Prometheus /metrics access.",
+        "description": "Protect Prometheus /metrics access with a token. Leave blank to disable token authentication.",
         "type": "password",
-        "placeholder": "optional",
+        "placeholder": "",
     },
     {
         "name": "cors_allowed_origins",
@@ -181,81 +201,89 @@ NETWORK_FIELD_CONFIGS = [
 USER_FIELD_CONFIGS = [
     {"name": "auth_username", "label": "Admin Username", "type": "text", "required": True, "placeholder": "admin", "group": "account"},
     {"name": "current_password", "label": "Current Admin Password", "type": "password", "required": False, "placeholder": "Required to change password", "group": "account"},
-    {"name": "auth_password", "label": "New Admin Password", "type": "password", "required": False, "placeholder": "Leave blank to keep", "group": "account"},
+    {"name": "auth_password", "label": "New Admin Password", "type": "password", "required": False, "placeholder": "", "group": "account"},
     {"name": "auth_password_confirm", "label": "Confirm New Password", "type": "password", "required": False, "placeholder": "", "group": "account"},
-    {"name": "api_token", "label": "ABSulli API Token", "type": "password", "required": False, "placeholder": "optional", "group": "api"},
 ]
 
 AGENT_FIELD_CONFIGS = {
     "email": {
         "label": "Email",
-        "icon": "✉",
+        "icon": "",
+        "icon_template": "partials/notification_icons/email.svg",
         "fields": [
             {"name": "email_smtp_host", "label": "SMTP Host", "type": "text", "required": True, "placeholder": "smtp.example.com"},
             {"name": "email_smtp_port", "label": "SMTP Port", "type": "number", "required": True, "placeholder": "465"},
             {"name": "email_from", "label": "From Address", "type": "email", "required": True, "placeholder": "absulli@example.com"},
             {"name": "email_to", "label": "To Address", "type": "email", "required": True, "placeholder": "you@example.com"},
             {"name": "email_smtp_username", "label": "SMTP Username", "type": "text", "required": False, "placeholder": "optional"},
-            {"name": "email_smtp_password", "label": "SMTP Password", "type": "password", "required": False, "placeholder": "Configured — leave blank to keep"},
+            {"name": "email_smtp_password", "label": "SMTP Password", "type": "password", "required": False, "placeholder": "optional"},
             {"name": "email_use_tls", "label": "Use SSL/TLS", "type": "checkbox", "required": False, "default": True},
         ],
     },
     "discord": {
         "label": "Discord",
-        "icon": "☯",
+        "icon": "",
+        "icon_template": "partials/notification_icons/discord.svg",
         "fields": [
             {"name": "discord_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://discord.com/api/webhooks/..."},
         ],
     },
     "gotify": {
         "label": "Gotify",
-        "icon": "☁",
+        "icon": "",
+        "icon_template": "partials/notification_icons/gotify.svg",
         "fields": [
-            {"name": "gotify_url", "label": "Server URL", "type": "url", "required": True, "placeholder": "http://gotify:80"},
-            {"name": "gotify_token", "label": "Application Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+            {"name": "gotify_url", "label": "Server URL", "type": "url", "required": True, "placeholder": ""},
+            {"name": "gotify_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "ntfy": {
         "label": "ntfy.sh",
-        "icon": "▣",
+        "icon": "",
+        "icon_template": "partials/notification_icons/ntfy.svg",
         "fields": [
             {"name": "ntfy_url", "label": "Topic URL", "type": "url", "required": True, "placeholder": "https://ntfy.sh/my-topic"},
-            {"name": "ntfy_token", "label": "Access Token", "type": "password", "required": False, "placeholder": "optional"},
+            {"name": "ntfy_token", "label": "Access Token", "type": "password", "required": False, "placeholder": ""},
         ],
     },
     "pushbullet": {
         "label": "Pushbullet",
-        "icon": "⏻",
+        "icon": "",
+        "icon_template": "partials/notification_icons/pushbullet.svg",
         "fields": [
-            {"name": "pushbullet_token", "label": "Access Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+            {"name": "pushbullet_token", "label": "Access Token", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "pushover": {
         "label": "Pushover",
-        "icon": "Ⓟ",
+        "icon": "",
+        "icon_template": "partials/notification_icons/pushover.svg",
         "fields": [
-            {"name": "pushover_app_token", "label": "Application Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
-            {"name": "pushover_user_key", "label": "User Key", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
+            {"name": "pushover_app_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
+            {"name": "pushover_user_key", "label": "User Key", "type": "password", "required": True, "placeholder": ""},
         ],
     },
     "slack": {
         "label": "Slack",
-        "icon": "✣",
+        "icon": "",
+        "icon_template": "partials/notification_icons/slack.svg",
         "fields": [
             {"name": "slack_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://hooks.slack.com/services/..."},
         ],
     },
     "telegram": {
         "label": "Telegram",
-        "icon": "◉",
+        "icon": "",
+        "icon_template": "partials/notification_icons/telegram.svg",
         "fields": [
-            {"name": "telegram_bot_token", "label": "Bot Token", "type": "password", "required": True, "placeholder": "Configured — leave blank to keep"},
-            {"name": "telegram_chat_id", "label": "Chat ID", "type": "text", "required": True, "placeholder": "123456789"},
+            {"name": "telegram_bot_token", "label": "Bot Token", "type": "password", "required": True, "placeholder": ""},
+            {"name": "telegram_chat_id", "label": "Chat ID", "type": "text", "required": True, "placeholder": ""},
         ],
     },
     "webhook": {
         "label": "Webhook",
-        "icon": "⚡",
+        "icon": "",
+        "icon_template": "partials/notification_icons/webhook.svg",
         "fields": [
             {"name": "webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://example.com/webhook"},
         ],
@@ -263,7 +291,13 @@ AGENT_FIELD_CONFIGS = {
 }
 
 NOTIFICATION_AGENT_TABS = [
-    {"id": agent_id, "label": config["label"], "icon": config["icon"], "available": True}
+    {
+        "id": agent_id,
+        "label": config["label"],
+        "icon": config["icon"],
+        "icon_template": config.get("icon_template", ""),
+        "available": True,
+    }
     for agent_id, config in AGENT_FIELD_CONFIGS.items()
 ]
 
@@ -335,17 +369,26 @@ def bool_setting(name: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def notification_events_context() -> list[dict[str, object]]:
-    return [
-        {
-            "event_type": event_type,
-            "setting": meta["setting"],
-            "label": meta["label"],
-            "description": meta["description"],
-            "enabled": bool_setting(str(meta["setting"]), bool(meta["default"])),
-        }
-        for event_type, meta in NOTIFICATION_EVENT_SETTINGS.items()
-    ]
+def notification_events_context(agent_id: str) -> list[dict[str, object]]:
+    events = []
+    for event_type, meta in NOTIFICATION_EVENT_SETTINGS.items():
+        base_setting = str(meta["setting"])
+        setting_name = f"{agent_id}_{base_setting}"
+        saved_value = setup_state.get_setup_setting(setting_name, "")
+        if saved_value == "":
+            enabled = bool_setting(base_setting, bool(meta["default"]))
+        else:
+            enabled = str(saved_value).strip().lower() in {"1", "true", "yes", "on"}
+        events.append(
+            {
+                "event_type": event_type,
+                "setting": setting_name,
+                "label": meta["label"],
+                "description": meta["description"],
+                "enabled": enabled,
+            }
+        )
+    return events
 
 def settings_field_from_env(settings, field_name: str) -> bool:
     return settings.field_configured(field_name)
@@ -497,10 +540,6 @@ def user_settings_context_fields(settings) -> list[dict[str, object]]:
             value = auth_username()
             from_env = settings.auth_username_from_env
             token_configured = False
-        elif field_name == "api_token":
-            value = ""
-            from_env = settings.api_token_from_env
-            token_configured = bool(settings.effective_api_token)
         else:
             value = saved_settings_field_value(settings, field)
             from_env = settings_field_from_env(settings, field_name)
@@ -542,19 +581,38 @@ def user_values_from_form(settings, form) -> tuple[dict[str, str], bool]:
             values["auth_password_hash"] = password_hash(new_password)
             password_changed = True
 
-    if not settings.api_token_from_env:
-        api_token = clean_agent_value(str(form.get("api_token") or ""))
-        if api_token:
-            if api_token == "change_me":
-                raise ValueError("API token cannot be change_me")
-            values["api_token"] = api_token
-        else:
-            existing = setup_state.get_setup_setting("api_token", "")
-            if existing:
-                values["api_token"] = existing
+
 
     return values, password_changed
 
+
+
+def api_settings_context(settings) -> dict[str, object]:
+    token = settings.effective_api_token or setup_state.ensure_api_token()
+    return {
+        "enabled": settings.effective_api_enabled,
+        "enabled_from_env": settings.api_enabled_from_env,
+        "token": token,
+        "token_from_env": settings.api_token_from_env,
+        "env_managed": settings.api_enabled_from_env or settings.api_token_from_env,
+    }
+
+
+def api_values_from_form(settings, form) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not settings.api_enabled_from_env:
+        values["api_enabled"] = "true" if form.get("api_enabled") == "on" else "false"
+    if not settings.api_token_from_env:
+        values["api_token"] = setup_state.ensure_api_token()
+    return values
+
+
+def regenerate_api_token(settings) -> str:
+    if settings.api_token_from_env:
+        raise ValueError("API key is managed by the environment")
+    token = secrets.token_urlsafe(32)
+    setup_state.set_setup_setting("api_token", token)
+    return token
 
 def network_values_from_form(settings, form) -> dict[str, str]:
     values: dict[str, str] = {}
@@ -571,8 +629,6 @@ def network_values_from_form(settings, form) -> dict[str, str]:
             values[field_name] = "true" if form.get(field_name) == "on" else "false"
             continue
         submitted = clean_agent_value(str(form.get(field_name) or ""))
-        if field_type == "password" and not submitted:
-            submitted = setup_state.get_setup_setting(field_name, "")
         values[field_name] = submitted
 
     if values.get("metrics_token") == "change_me":
@@ -580,6 +636,14 @@ def network_values_from_form(settings, form) -> dict[str, str]:
     if "cors_allowed_origins" in values:
         values["cors_allowed_origins"] = clean_cors_origins(values.get("cors_allowed_origins", ""))
     return values
+
+
+def regenerate_metrics_token(settings) -> str:
+    if settings_field_from_env(settings, "metrics_token"):
+        raise ValueError("Metrics token is managed by the environment")
+    token = secrets.token_urlsafe(32)
+    setup_state.set_setup_setting("metrics_token", token)
+    return token
 
 
 def gotify_settings_context(settings) -> dict[str, object]:
@@ -634,11 +698,13 @@ def agent_settings_context(settings) -> list[dict[str, object]]:
                 "id": agent_id,
                 "label": config["label"],
                 "icon": config["icon"],
+                "icon_template": config.get("icon_template", ""),
                 "available": True,
                 "enabled": enabled,
                 "configured": configured,
                 "env_managed": env_managed,
                 "fields": fields,
+                "notification_events": notification_events_context(agent_id),
             }
         )
     return agents

@@ -260,11 +260,16 @@ def _extract_bearer_token(value: str | None) -> str:
 
 def _valid_api_token(request: Request) -> bool:
     settings = get_settings()
+    if not settings.effective_api_enabled:
+        return False
+
     expected = settings.effective_api_token
     if not expected:
         return False
 
-    provided = _extract_bearer_token(request.headers.get("Authorization"))
+    provided = request.headers.get("X-API-Key", "").strip()
+    if not provided:
+        provided = _extract_bearer_token(request.headers.get("Authorization"))
     if not provided:
         provided = request.headers.get("X-Absulli-Api-Token", "").strip()
     return bool(provided and secrets.compare_digest(provided, expected))

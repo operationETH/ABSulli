@@ -57,7 +57,12 @@ def test_general_settings_tab_renders_editable_audiobookshelf_fields(monkeypatch
     assert "Audiobookshelf Connection" in response.text
     assert "Audiobookshelf URL" in response.text
     assert "http://saved-abs:13378" in response.text
-    assert "Configured — leave blank to keep" in response.text
+    assert 'id="abs-api-key"' in response.text
+    assert 'value="saved-key"' in response.text
+    assert 'type="password"' in response.text
+    assert 'data-abs-api-key-toggle' in response.text
+    assert 'data-abs-api-key-copy' in response.text
+    assert 'readonly' not in response.text.split('id="abs-api-key"', 1)[1].split('>', 1)[0]
     assert 'name="abs_request_timeout"' in response.text
     assert 'value="22"' in response.text
     assert 'name="abs_poll_interval"' in response.text
@@ -138,8 +143,20 @@ def test_general_settings_env_values_win_over_saved_settings(monkeypatch):
 
     page = client.get("/settings?tab=general")
     assert page.status_code == 200
-    assert "http://env-abs:13378" in page.text
-    assert "Managed by .env." in page.text
+    assert 'name="abs_url"' in page.text
+    abs_url_input = page.text.split('name="abs_url"', 1)[1].split('>', 1)[0]
+    assert 'value="Configured via .env read only"' in abs_url_input
+    assert 'readonly' in abs_url_input
+    assert "http://env-abs:13378" not in page.text
+    assert "Managed by .env." not in page.text
+    assert 'id="abs-api-key"' in page.text
+    assert 'value="Configured via .env read only"' in page.text
+    assert 'data-abs-api-key-value="env-key"' in page.text
+    assert 'data-abs-api-key-from-env="true"' in page.text
+    abs_input = page.text.split('id="abs-api-key"', 1)[1].split('>', 1)[0]
+    assert 'readonly' in abs_input
+    assert 'data-abs-api-key-toggle' in page.text
+    assert 'data-abs-api-key-copy' in page.text
 
     response = client.post(
         "/settings/general",

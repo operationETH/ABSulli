@@ -7,6 +7,7 @@ import absulli.core.setup_state as setup_state
 import absulli.web.routes as web_routes
 import absulli.web.settings as web_settings
 from absulli.core.config import Settings, get_settings
+from absulli.database.models import NotificationDelivery, NotificationEvent
 from absulli.notifiers.manager import NotificationManager
 from absulli.web.routes import router as web_router
 
@@ -77,6 +78,19 @@ def test_gotify_save_accepts_token_from_settings_page(monkeypatch):
     assert store["gotify_token"] == "app-token"
 
 
+def test_notification_placeholders_are_clean(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications&agent=gotify")
+
+    assert response.status_code == 200
+    assert 'name="gotify_url"' in response.text
+    assert 'name="gotify_token"' in response.text
+    assert 'placeholder="http://gotify:80"' not in response.text
+    assert 'placeholder="Application token"' not in response.text
+    assert "Leave blank to keep the saved value." not in response.text
+
+
 def test_settings_page_shows_gotify_form_with_saved_values(monkeypatch):
     client, _store = make_client(
         monkeypatch,
@@ -89,7 +103,7 @@ def test_settings_page_shows_gotify_form_with_saved_values(monkeypatch):
     assert "Notification Settings" in response.text
     assert "Gotify" in response.text
     assert 'value="http://gotify.local"' in response.text
-    assert "Configured — leave blank to keep" in response.text
+    assert "Configured. Leave blank to keep" in response.text
     assert "Enabled" in response.text
 
 
@@ -229,6 +243,17 @@ def test_settings_page_shows_all_notification_agent_tabs(monkeypatch):
     assert "Coming soon" not in response.text
 
 
+def test_notification_agent_tabs_render_service_icons(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications")
+
+    assert response.status_code == 200
+    assert response.text.count('<span class="agent-tab-icon" aria-hidden="true">') == 9
+    assert response.text.count("<svg") >= 9
+    assert "/static/img/notifications/" not in response.text
+
+
 def test_discord_agent_save_persists_webhook(monkeypatch):
     client, store = make_client(monkeypatch)
 
@@ -294,23 +319,27 @@ def test_missing_agent_required_field_returns_error(monkeypatch):
     assert response.json() == {"ok": False, "message": "Slack required fields are missing."}
 
 
-def test_notification_events_are_global_and_visible_for_every_agent(monkeypatch):
+def test_notification_events_use_agent_specific_names(monkeypatch):
     client, _store = make_client(monkeypatch)
 
     response = client.get('/settings?tab=notifications')
 
     assert response.status_code == 200
-    for setting in [
-        'notify_playback_started',
-        'notify_playback_stopped',
-        'notify_abs_connection_failed',
-        'notify_abs_connection_restored',
-    ]:
-        assert response.text.count(f'name="{setting}"') == 9
+    for agent_id in ["email", "discord", "gotify", "ntfy", "pushbullet", "pushover", "slack", "telegram", "webhook"]:
+        for setting in [
+            'notify_playback_started',
+            'notify_playback_stopped',
+            'notify_abs_connection_failed',
+            'notify_abs_connection_restored',
+            'notify_new_book',
+            'notify_new_podcast',
+            'notify_new_podcast_episode',
+        ]:
+            assert response.text.count(f'name="{agent_id}_{setting}"') == 1
     assert response.text.count('Notification Events') == 9
 
 
-def test_notification_event_settings_use_global_names_when_saved_from_any_agent(monkeypatch):
+def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
     client, store = make_client(monkeypatch)
 
     response = client.post(
@@ -318,20 +347,37 @@ def test_notification_event_settings_use_global_names_when_saved_from_any_agent(
         data={
             'enabled': 'on',
             'discord_webhook_url': 'https://discord.example/webhook',
-            'notify_playback_started': 'on',
-            'notify_abs_connection_restored': 'on',
+            'discord_notify_playback_started': 'on',
+            'discord_notify_abs_connection_restored': 'on',
             'csrf_token': 'valid-token',
         },
         follow_redirects=False,
     )
 
     assert response.status_code == 303
-    assert store['notify_playback_started'] == 'true'
-    assert store['notify_playback_stopped'] == 'false'
-    assert store['notify_abs_connection_failed'] == 'false'
-    assert store['notify_abs_connection_restored'] == 'true'
+    assert store['discord_notify_playback_started'] == 'true'
+    assert store['discord_notify_playback_stopped'] == 'false'
+    assert store['discord_notify_abs_connection_failed'] == 'false'
+    assert store['discord_notify_abs_connection_restored'] == 'true'
+    assert store['discord_notify_new_book'] == 'false'
+    assert store['discord_notify_new_podcast'] == 'false'
+    assert store['discord_notify_new_podcast_episode'] == 'false'
     assert 'gotify_notify_playback_started' not in store
-    assert 'gotify_notify_playback_stopped' not in store
+    assert 'notify_playback_started' not in store
+
+
+def test_notification_events_preserve_legacy_global_values_until_agent_is_saved(monkeypatch):
+    client, _store = make_client(monkeypatch, {'notify_new_book': 'true'})
+
+    response = client.get('/settings?tab=notifications')
+
+    assert response.status_code == 200
+    for agent_id in ["email", "discord", "gotify", "ntfy", "pushbullet", "pushover", "slack", "telegram", "webhook"]:
+        marker = f'name="{agent_id}_notify_new_book"'
+        start = response.text.index(marker)
+        tag_start = response.text.rfind('<input', 0, start)
+        tag_end = response.text.index('>', start)
+        assert 'checked' in response.text[tag_start:tag_end]
 
 
 def test_notification_events_default_to_unchecked(monkeypatch):
@@ -340,18 +386,22 @@ def test_notification_events_default_to_unchecked(monkeypatch):
     response = client.get('/settings?tab=notifications')
 
     assert response.status_code == 200
-    for setting in [
-        'notify_playback_started',
-        'notify_playback_stopped',
-        'notify_abs_connection_failed',
-        'notify_abs_connection_restored',
-    ]:
-        marker = f'name="{setting}"'
-        start = response.text.index(marker)
-        tag_start = response.text.rfind('<input', 0, start)
-        tag_end = response.text.index('>', start)
-        input_tag = response.text[tag_start:tag_end]
-        assert 'checked' not in input_tag
+    for agent_id in ["email", "discord", "gotify", "ntfy", "pushbullet", "pushover", "slack", "telegram", "webhook"]:
+        for setting in [
+            'notify_playback_started',
+            'notify_playback_stopped',
+            'notify_abs_connection_failed',
+            'notify_abs_connection_restored',
+            'notify_new_book',
+            'notify_new_podcast',
+            'notify_new_podcast_episode',
+        ]:
+            marker = f'name="{agent_id}_{setting}"'
+            start = response.text.index(marker)
+            tag_start = response.text.rfind('<input', 0, start)
+            tag_end = response.text.index('>', start)
+            input_tag = response.text[tag_start:tag_end]
+            assert 'checked' not in input_tag
 
 
 def test_notification_manager_defaults_all_events_disabled(monkeypatch):
@@ -364,16 +414,144 @@ def test_notification_manager_defaults_all_events_disabled(monkeypatch):
     assert event_enabled('playback_stop') is False
     assert event_enabled('abs_connection_failed') is False
     assert event_enabled('abs_connection_restored') is False
+    assert event_enabled('new_book') is False
+    assert event_enabled('new_podcast') is False
+    assert event_enabled('new_podcast_episode') is False
 
 
-def test_notification_manager_returns_true_for_stored_enabled_event(monkeypatch):
-    client, _store = make_client(monkeypatch, {"notify_playback_started": "true"})
+def test_notification_manager_supports_agent_specific_events(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_playback_started': 'true',
+            'discord_notify_playback_started': 'false',
+            'discord_notify_new_book': 'true',
+        },
+    )
     assert client
 
-    from absulli.notifiers.manager import event_enabled
+    from absulli.notifiers.manager import agent_event_enabled, event_enabled
 
-    assert event_enabled("playback_start") is True
-    assert event_enabled("playback_stop") is False
+    assert agent_event_enabled('gotify', 'playback_start') is True
+    assert agent_event_enabled('discord', 'playback_start') is False
+    assert agent_event_enabled('discord', 'new_book') is True
+    assert event_enabled('playback_start') is True
+    assert event_enabled('new_book') is True
+    assert event_enabled('playback_stop') is False
+
+
+def test_notification_manager_sends_only_to_agents_enabled_for_event(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_new_book': 'true',
+            'discord_notify_new_book': 'false',
+        },
+    )
+    assert client
+    calls = []
+
+    class FakeAgent:
+        def __init__(self, name):
+            self.name = name
+
+        async def send(self, title, message, extra=None):
+            calls.append((self.name, title, message, extra))
+
+    class FakeDb:
+        def __init__(self):
+            self.events = []
+            self.deliveries = []
+
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+                self.events.append(record)
+            if isinstance(record, NotificationDelivery):
+                self.deliveries.append(record)
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(
+        manager,
+        'named_agents',
+        lambda: [('gotify', FakeAgent('gotify')), ('discord', FakeAgent('discord'))],
+    )
+    db = FakeDb()
+
+    asyncio.run(manager.notify(db, 'new_book', 'New book added', 'Example'))
+
+    assert calls == [('gotify', 'New book added', 'Example', {'event_type': 'new_book'})]
+    assert len(db.events) == 1
+    assert db.events[0].delivered is True
+    assert len(db.deliveries) == 1
+    assert db.deliveries[0].event_id == 42
+    assert db.deliveries[0].agent == 'gotify'
+    assert db.deliveries[0].delivered is True
+    assert db.deliveries[0].error == ''
+
+
+def test_notification_manager_records_delivery_status_per_agent(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_new_book': 'true',
+            'discord_notify_new_book': 'true',
+        },
+    )
+    assert client
+
+    class FakeAgent:
+        def __init__(self, error=''):
+            self.error = error
+
+        async def send(self, title, message, extra=None):
+            if self.error:
+                raise RuntimeError(self.error)
+
+    class FakeDb:
+        def __init__(self):
+            self.events = []
+            self.deliveries = []
+
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+                self.events.append(record)
+            if isinstance(record, NotificationDelivery):
+                self.deliveries.append(record)
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(
+        manager,
+        'named_agents',
+        lambda: [
+            ('gotify', FakeAgent()),
+            ('discord', FakeAgent('Discord rejected the webhook')),
+        ],
+    )
+    db = FakeDb()
+
+    asyncio.run(manager.notify(db, 'new_book', 'New book added', 'Example'))
+
+    assert len(db.events) == 1
+    assert db.events[0].delivered is True
+    assert len(db.deliveries) == 2
+
+    gotify = next(delivery for delivery in db.deliveries if delivery.agent == 'gotify')
+    discord = next(delivery for delivery in db.deliveries if delivery.agent == 'discord')
+
+    assert gotify.event_id == 42
+    assert gotify.delivered is True
+    assert gotify.error == ''
+    assert discord.event_id == 42
+    assert discord.delivered is False
+    assert discord.error == 'Discord rejected the webhook'
 
 
 def test_settings_general_tab_is_default(monkeypatch):
@@ -425,3 +603,32 @@ def test_settings_tabs_render_network_users_and_about_sections(monkeypatch):
     assert 'Database Path' in about.text
     assert 'Migration Version' in about.text
     assert 'Migrations' not in about.text
+
+
+def test_notification_agent_failure_log_redacts_secret_url(monkeypatch, caplog):
+    client, _store = make_client(monkeypatch)
+
+    class FakeDiscordAgent:
+        def __init__(self, webhook_url):
+            self.webhook_url = webhook_url
+
+        async def send(self, title, message, extra=None):
+            raise RuntimeError(
+                "Client error '401 Unauthorized' for url "
+                "'https://discord.com/api/webhooks/123/secret-token'"
+            )
+
+    monkeypatch.setattr(web_settings, "DiscordAgent", FakeDiscordAgent)
+
+    response = client.post(
+        "/settings/notifications/discord/test",
+        data={
+            "enabled": "on",
+            "discord_webhook_url": "https://discord.com/api/webhooks/123/secret-token",
+            "csrf_token": "valid-token",
+        },
+    )
+
+    assert response.status_code == 502
+    assert "401 Unauthorized" in caplog.text
+    assert "secret-token" not in caplog.text

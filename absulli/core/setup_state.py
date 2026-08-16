@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import threading
 import time
 
@@ -60,8 +61,18 @@ def _cache_invalidate(*keys: str) -> None:
 def warm_setup_state_cache() -> None:
     """Ensure the setup settings table exists during startup, not during a request."""
     _ensure_settings_table()
-    for key in (SETUP_COMPLETE_SETTING, "auth_username", "auth_password_hash"):
+    for key in (SETUP_COMPLETE_SETTING, "auth_username", "auth_password_hash", "api_enabled", "api_token"):
         get_setup_setting(key)
+    ensure_api_token()
+
+
+def ensure_api_token() -> str:
+    token = get_setup_setting("api_token", "").strip()
+    if token:
+        return token
+    token = secrets.token_urlsafe(32)
+    set_setup_setting("api_token", token)
+    return token
 
 
 def get_setup_setting(key: str, default: str = "") -> str:

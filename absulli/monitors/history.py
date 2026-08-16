@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import time
@@ -5,9 +6,10 @@ from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
-from absulli.database.models import AbsUser, Library, ListeningHistory, MediaItem
+from absulli.database.models import AbsUser, Library, ListeningHistory, MediaItem, Setting
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.utils import friendly_names
+from absulli.notifiers.manager import event_enabled
 from absulli.http.normalizers import (
     normalize_history_payload,
     normalize_library_payload,
@@ -20,8 +22,163 @@ log = logging.getLogger(__name__)
 
 
 class HistoryMonitor:
-    def __init__(self, client: AudiobookshelfClient):
+    def __init__(self, client: AudiobookshelfClient, notifier=None):
         self.client = client
+        self.notifier = notifier
+
+    def _new_book_baseline_key(self, library_id: str) -> str:
+        digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_new_book_baseline_{digest}"
+
+    def _new_book_baseline_complete(self, db: Session, library_id: str) -> bool:
+        key = self._new_book_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return bool(row and str(row.value).strip().lower() == "true")
+
+    def _mark_new_book_baseline_complete(self, db: Session, library_id: str) -> None:
+        key = self._new_book_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = "true"
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value="true", updated_at=utcnow()))
+
+    async def _notify_new_books(self, db: Session, books: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for book in books:
+            title = book.get("title") or "Unknown"
+            author = book.get("author") or "Unknown author"
+            library_name = book.get("library_name") or "Audiobookshelf"
+            body = f"{title} by {author} was added to {library_name}."
+            try:
+                await self.notifier.notify(db, "new_book", "New book added", body)
+            except Exception as exc:
+                log.warning("New book notification failed for %s: %s", title, exc)
+
+    def _new_podcast_baseline_key(self, library_id: str) -> str:
+        digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_new_podcast_baseline_{digest}"
+
+    def _new_podcast_baseline_complete(self, db: Session, library_id: str) -> bool:
+        key = self._new_podcast_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return bool(row and str(row.value).strip().lower() == "true")
+
+    def _mark_new_podcast_baseline_complete(self, db: Session, library_id: str) -> None:
+        key = self._new_podcast_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = "true"
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value="true", updated_at=utcnow()))
+
+    async def _notify_new_podcasts(self, db: Session, podcasts: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for podcast in podcasts:
+            title = podcast.get("title") or "Unknown"
+            author = podcast.get("author") or "Unknown author"
+            library_name = podcast.get("library_name") or "Audiobookshelf"
+            body = f"{title} by {author} was added to {library_name}."
+            try:
+                await self.notifier.notify(db, "new_podcast", "New podcast added", body)
+            except Exception as exc:
+                log.warning("New podcast notification failed for %s: %s", title, exc)
+
+    def _podcast_episode_baseline_key(self, podcast_id: str) -> str:
+        digest = hashlib.sha256(podcast_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_podcast_episode_baseline_{digest}"
+
+    def _podcast_episode_baseline(self, db: Session, podcast_id: str) -> set[str] | None:
+        key = self._podcast_episode_baseline_key(podcast_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "[]")
+        except (TypeError, ValueError):
+            return set()
+        if not isinstance(values, list):
+            return set()
+        return {str(value) for value in values if value}
+
+    def _store_podcast_episode_baseline(self, db: Session, podcast_id: str, episode_ids: set[str]) -> None:
+        key = self._podcast_episode_baseline_key(podcast_id)
+        value = json.dumps(sorted(episode_ids))
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _clear_podcast_episode_baselines(self, db: Session, items: list[dict]) -> None:
+        for item in items:
+            podcast_id = str(item.get("abs_item_id") or "").strip()
+            if not podcast_id:
+                continue
+            key = self._podcast_episode_baseline_key(podcast_id)
+            row = db.query(Setting).filter(Setting.key == key).first()
+            if row:
+                db.delete(row)
+
+    async def _notify_new_podcast_episodes(self, db: Session, episodes: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for episode in episodes:
+            podcast_title = episode.get("podcast_title") or "Unknown podcast"
+            episode_title = episode.get("episode_title") or "Unknown episode"
+            library_name = episode.get("library_name") or "Audiobookshelf"
+            body = f"{podcast_title} - {episode_title} was added to {library_name}."
+            try:
+                await self.notifier.notify(db, "new_podcast_episode", "New podcast episode added", body)
+            except Exception as exc:
+                log.warning("New podcast episode notification failed for %s: %s", episode_title, exc)
+
+    async def _sync_podcast_episode_baselines(self, db: Session, library: Library, items: list[dict]) -> list[dict]:
+        new_episodes: list[dict] = []
+        for item in items:
+            podcast_id = str(item.get("abs_item_id") or "").strip()
+            if not podcast_id:
+                continue
+            try:
+                payload = await self.client.get_item(podcast_id, expanded=True)
+            except Exception as exc:
+                log.debug("Podcast episode sync failed for %s: %s", podcast_id, exc)
+                continue
+
+            media = payload.get("media") if isinstance(payload, dict) else None
+            media = media if isinstance(media, dict) else {}
+            metadata = media.get("metadata")
+            metadata = metadata if isinstance(metadata, dict) else {}
+            raw_episodes = media.get("episodes")
+            raw_episodes = raw_episodes if isinstance(raw_episodes, list) else []
+
+            podcast_title = str(metadata.get("title") or item.get("title") or "Unknown podcast")
+            episodes = [episode for episode in raw_episodes if isinstance(episode, dict) and episode.get("id")]
+            current_ids = {str(episode["id"]) for episode in episodes}
+            baseline = self._podcast_episode_baseline(db, podcast_id)
+
+            if baseline is not None:
+                for episode in episodes:
+                    episode_id = str(episode["id"])
+                    if episode_id in baseline:
+                        continue
+                    new_episodes.append(
+                        {
+                            "podcast_title": podcast_title,
+                            "episode_title": str(episode.get("title") or "Unknown episode"),
+                            "library_name": library.name,
+                        }
+                    )
+
+            remembered_ids = current_ids if baseline is None else baseline | current_ids
+            self._store_podcast_episode_baseline(db, podcast_id, remembered_ids)
+
+        return new_episodes
 
     def _chunks(self, values: Iterable[str], size: int = 900) -> Iterable[list[str]]:
         chunk: list[str] = []
@@ -263,6 +420,9 @@ class HistoryMonitor:
     async def sync_recent_items(self, db: Session, libraries: list[Library]) -> int:
         started = time.perf_counter()
         imported = 0
+        new_books: list[dict] = []
+        new_podcasts: list[dict] = []
+        new_podcast_episodes: list[dict] = []
         request_limit = 5000
         for library in libraries:
             library_started = time.perf_counter()
@@ -274,6 +434,11 @@ class HistoryMonitor:
 
             current_ids = {item["abs_item_id"] for item in items if item.get("abs_item_id")}
             existing_map = self._media_items_by_abs_id(db, current_ids)
+            media_type = str(library.media_type or "").strip().lower()
+            is_book_library = media_type == "book"
+            is_podcast_library = media_type == "podcast"
+            book_baseline_complete = self._new_book_baseline_complete(db, library.abs_library_id) if is_book_library else False
+            podcast_baseline_complete = self._new_podcast_baseline_complete(db, library.abs_library_id) if is_podcast_library else False
             now = utcnow()
 
             if total is not None:
@@ -294,6 +459,21 @@ class HistoryMonitor:
                     db.add(existing)
                     existing_map[item_id] = existing
                     imported += 1
+                    if is_book_library and book_baseline_complete:
+                        new_books.append(dict(item))
+                    if is_podcast_library and podcast_baseline_complete:
+                        new_podcasts.append(dict(item))
+
+            if is_book_library and full_library_loaded and not book_baseline_complete:
+                self._mark_new_book_baseline_complete(db, library.abs_library_id)
+            if is_podcast_library and full_library_loaded and not podcast_baseline_complete:
+                self._mark_new_podcast_baseline_complete(db, library.abs_library_id)
+            if is_podcast_library and full_library_loaded:
+                episode_notifications_enabled = bool(self.notifier and event_enabled("new_podcast_episode"))
+                if episode_notifications_enabled:
+                    new_podcast_episodes.extend(await self._sync_podcast_episode_baselines(db, library, items))
+                else:
+                    self._clear_podcast_episode_baselines(db, items)
 
             if current_ids and full_library_loaded:
                 deleted = (
@@ -315,6 +495,9 @@ class HistoryMonitor:
                 )
 
         db.commit()
+        await self._notify_new_books(db, new_books)
+        await self._notify_new_podcasts(db, new_podcasts)
+        await self._notify_new_podcast_episodes(db, new_podcast_episodes)
         elapsed = time.perf_counter() - started
         if elapsed >= 2:
             log.info("Recent item sync completed in %.2fs (%s imported)", elapsed, imported)

@@ -6,7 +6,7 @@ from urllib.parse import quote, urlencode
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from sqlalchemy import desc, func, or_
+from sqlalchemy import and_, desc, exists, func, or_
 from sqlalchemy.orm import Session
 
 from absulli import __version__
@@ -21,8 +21,9 @@ from absulli.core.cover_cache import (
     write_cover_cache,
     write_negative_cover_cache,
 )
-from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationEvent
+from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent
 from absulli.database.session import get_db
+from absulli.notifiers.manager import clean_notification_error
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.core.security import (
@@ -104,6 +105,8 @@ from absulli.web.settings import (
     agent_required_fields_present,
     agent_settings_context,
     agent_values_from_form,
+    api_settings_context,
+    api_values_from_form,
     clean_settings_tab,
     general_settings_context,
     general_values_from_form,
@@ -113,6 +116,8 @@ from absulli.web.settings import (
     network_settings_context,
     network_values_from_form,
     notification_events_context,
+    regenerate_api_token,
+    regenerate_metrics_token,
     settings_field_from_env,
     settings_tab_context,
     user_settings_context_fields,
@@ -1240,16 +1245,15 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
                         f"{settings.effective_auth_login_lockout_seconds} second lockout"
                     ),
                 },
-                {"label": "ABSulli API Token", "value": "Configured" if settings.effective_api_token else "Not configured"},
             ],
             "user_fields": user_settings_context_fields(settings),
             "about_settings": about_settings_context(settings, db, update_status(settings, __version__)),
             "about_data": about_data_context(db),
             "general_fields": general_settings_context(settings),
             "network_fields": network_settings_context(settings),
+            "api_settings": api_settings_context(settings),
             "gotify": gotify_settings_context(settings),
             "notification_agents": agent_context,
-            "notification_events": notification_events_context(),
             "settings_saved": bool(request.query_params.get("saved")),
             "settings_error": request.query_params.get("error") or "",
             "page": "settings",
@@ -1258,6 +1262,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         },
     )
     set_csrf_cookie(response, csrf_token)
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -1284,6 +1289,50 @@ async def settings_users_save(request: Request):
         rotate_session_version()
         set_session_cookie(response, values.get("auth_username") or auth_username())
     return response
+
+
+@router.post("/settings/api", response_class=HTMLResponse)
+async def settings_api_save(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    values = api_values_from_form(settings, form)
+    if values:
+        set_setup_settings(values)
+    return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+
+
+@router.post("/settings/api/regenerate", response_class=HTMLResponse)
+async def settings_api_regenerate(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        regenerate_api_token(settings)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=api&error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+
+
+@router.post("/settings/network/metrics-token/regenerate", response_class=HTMLResponse)
+async def settings_metrics_token_regenerate(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    settings = get_settings()
+    try:
+        regenerate_metrics_token(settings)
+    except ValueError as exc:
+        return RedirectResponse(f"/settings?tab=network&error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/settings?tab=network&saved=network", status_code=303)
 
 
 @router.post("/settings/network", response_class=HTMLResponse)
@@ -1382,7 +1431,7 @@ async def settings_notification_agent_save(request: Request, agent_id: str):
     is_enabled = form.get("enabled") == "on"
 
     for meta in NOTIFICATION_EVENT_SETTINGS.values():
-        setting_name = str(meta["setting"])
+        setting_name = f"{agent_id}_{meta["setting"]}"
         values[setting_name] = "true" if form.get(setting_name) == "on" else "false"
 
     values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"
@@ -1440,13 +1489,146 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
             {"event_type": "test"},
         )
     except Exception as exc:
-        log.warning("%s test notification failed: %s", AGENT_FIELD_CONFIGS[agent_id]["label"], exc)
+        log.warning("%s test notification failed: %s", AGENT_FIELD_CONFIGS[agent_id]["label"], clean_notification_error(exc))
         return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test failed. Check the settings and network."}, status_code=502)
 
     return {"ok": True, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test notification sent."}
 
 
+
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications(request: Request, db: Session = Depends(get_db)):
-    rows = db.query(NotificationEvent).order_by(desc(NotificationEvent.created_at)).limit(200).all()
-    return templates.TemplateResponse(request, "notifications.html", {"rows": rows, "page": "notifications"})
+    limit = history_page_size(request)
+    selected_type = (request.query_params.get("type") or "").strip()
+    selected_agent = (request.query_params.get("agent") or "").strip()
+    selected_status = (request.query_params.get("status") or "").strip().lower()
+    if selected_status not in {"delivered", "failed"}:
+        selected_status = ""
+
+    event_query = db.query(NotificationEvent)
+    if selected_type:
+        event_query = event_query.filter(NotificationEvent.event_type == selected_type)
+
+    matching_delivery = exists().where(NotificationDelivery.event_id == NotificationEvent.id)
+    failed_delivery = exists().where(
+        and_(
+            NotificationDelivery.event_id == NotificationEvent.id,
+            NotificationDelivery.delivered.is_(False),
+        )
+    )
+
+    if selected_agent:
+        agent_delivery = exists().where(
+            and_(
+                NotificationDelivery.event_id == NotificationEvent.id,
+                NotificationDelivery.agent == selected_agent,
+            )
+        )
+        event_query = event_query.filter(agent_delivery)
+        if selected_status:
+            agent_status = exists().where(
+                and_(
+                    NotificationDelivery.event_id == NotificationEvent.id,
+                    NotificationDelivery.agent == selected_agent,
+                    NotificationDelivery.delivered.is_(selected_status == "delivered"),
+                )
+            )
+            event_query = event_query.filter(agent_status)
+    elif selected_status == "failed":
+        event_query = event_query.filter(
+            or_(
+                failed_delivery,
+                and_(~matching_delivery, NotificationEvent.delivered.is_(False)),
+            )
+        )
+    elif selected_status == "delivered":
+        event_query = event_query.filter(
+            or_(
+                and_(matching_delivery, ~failed_delivery),
+                and_(~matching_delivery, NotificationEvent.delivered.is_(True)),
+            )
+        )
+
+    total = event_query.count()
+    pagination = pagination_context(request, total, limit, "notification entries")
+    current_page = pagination["pagination"]["current_page"]
+    events = (
+        event_query
+        .order_by(desc(NotificationEvent.created_at), desc(NotificationEvent.id))
+        .offset(query_offset(current_page, limit))
+        .limit(limit)
+        .all()
+    )
+
+    event_ids = [event.id for event in events]
+    delivery_map = {}
+    if event_ids:
+        deliveries = (
+            db.query(NotificationDelivery)
+            .filter(NotificationDelivery.event_id.in_(event_ids))
+            .order_by(NotificationDelivery.id)
+            .all()
+        )
+        for delivery in deliveries:
+            delivery_map.setdefault(delivery.event_id, []).append(
+                {
+                    "agent": delivery.agent,
+                    "label": AGENT_FIELD_CONFIGS.get(delivery.agent, {}).get("label", delivery.agent),
+                    "delivered": delivery.delivered,
+                    "error": clean_notification_error(delivery.error),
+                }
+            )
+
+    type_values = [value for value, in db.query(NotificationEvent.event_type).distinct().order_by(NotificationEvent.event_type).all()]
+    type_options = [
+        {
+            "value": value,
+            "label": NOTIFICATION_EVENT_SETTINGS.get(value, {}).get("label", value.replace("_", " ").title()),
+        }
+        for value in type_values
+    ]
+    agent_values = [value for value, in db.query(NotificationDelivery.agent).distinct().order_by(NotificationDelivery.agent).all()]
+    agent_options = [
+        {
+            "value": value,
+            "label": AGENT_FIELD_CONFIGS.get(value, {}).get("label", value),
+        }
+        for value in agent_values
+    ]
+    rows = [{"event": event, "deliveries": delivery_map.get(event.id, [])} for event in events]
+    notification_log_has_entries = db.query(NotificationEvent.id).first() is not None
+    context = {
+        "rows": rows,
+        "page": "notifications",
+        "type_options": type_options,
+        "agent_options": agent_options,
+        "selected_type": selected_type,
+        "selected_agent": selected_agent,
+        "selected_status": selected_status,
+        "notification_log_has_entries": notification_log_has_entries,
+        "history_page_size_hidden_params": [
+            (name, value)
+            for name, value in (("type", selected_type), ("agent", selected_agent), ("status", selected_status))
+            if value
+        ],
+    }
+    csrf_token = create_csrf_token()
+    context["csrf_token"] = csrf_token
+    context.update(history_page_size_context(limit))
+    context.update(pagination)
+    response = templates.TemplateResponse(request, "notifications.html", context)
+    set_csrf_cookie(response, csrf_token)
+    return response
+
+
+@router.post("/notifications/clear", response_class=HTMLResponse)
+async def notifications_clear(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your notification log form expired. Refresh and try again.")
+
+    db.query(NotificationDelivery).delete(synchronize_session=False)
+    db.query(NotificationEvent).delete(synchronize_session=False)
+    db.commit()
+    return RedirectResponse("/notifications", status_code=303)

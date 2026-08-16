@@ -1,5 +1,89 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero"><div><h1>Notifications</h1></div></section>
-<section class="panel"><div class="panel-head"><h2>Notification Log</h2></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Type</th><th>Title</th><th>Body</th><th>Delivered</th></tr></thead><tbody>{% for row in rows %}<tr><td>{{ row.created_at|local_datetime }}</td><td>{{ row.event_type }}</td><td>{{ row.title }}</td><td>{{ row.body }}</td><td><span class="badge {{ 'good' if row.delivered else 'warn' }}">{{ row.delivered }}</span></td></tr>{% else %}<tr><td colspan="5" class="empty">No notification events yet.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="panel notification-log-panel">
+  <div class="panel-head">
+    <h2>Notification Log</h2>
+    <div class="panel-actions">
+      <form class="history-page-size notification-log-filters" method="get">
+        <div class="notification-filter-group">
+          <label for="notification-type-filter">Type</label>
+          <select id="notification-type-filter" name="type" data-auto-submit>
+            <option value="">All types</option>
+            {% for option in type_options %}
+            <option value="{{ option.value }}" {% if option.value == selected_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="notification-filter-group">
+          <label for="notification-agent-filter">Agent</label>
+          <select id="notification-agent-filter" name="agent" data-auto-submit>
+            <option value="">All agents</option>
+            {% for option in agent_options %}
+            <option value="{{ option.value }}" {% if option.value == selected_agent %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="notification-filter-group">
+          <label for="notification-status-filter">Status</label>
+          <select id="notification-status-filter" name="status" data-auto-submit>
+            <option value="">All statuses</option>
+            <option value="delivered" {% if selected_status == 'delivered' %}selected{% endif %}>Delivered</option>
+            <option value="failed" {% if selected_status == 'failed' %}selected{% endif %}>Failed</option>
+          </select>
+        </div>
+        <input type="hidden" name="limit" value="{{ history_page_size }}">
+      </form>
+      {% include "partials/history_page_size.html" %}
+      <form class="notification-clear-form" method="post" action="/notifications/clear" data-notification-clear>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="notification-clear-button" type="submit" {% if not notification_log_has_entries %}disabled{% endif %}>Clear log</button>
+      </form>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table notification-log-table">
+      <thead><tr><th>Time</th><th>Type</th><th>Title</th><th>Body</th><th>Agents</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.event.created_at|local_datetime }}</td>
+          <td>{{ row.event.event_type }}</td>
+          <td>{{ row.event.title }}</td>
+          <td>{{ row.event.body }}</td>
+          <td class="notification-agents-cell">
+            {% if row.deliveries %}
+            <div class="notification-agent-list">
+              {% for delivery in row.deliveries %}
+              <span class="notification-agent-badge {{ 'good' if delivery.delivered else 'warn' }}">
+                {{ delivery.label }}
+              </span>
+              {% endfor %}
+            </div>
+            {% set failed_deliveries = row.deliveries|selectattr('error')|list %}
+            {% if failed_deliveries %}
+            <details class="notification-error-details">
+              <summary>Error details</summary>
+              <div class="notification-error-list">
+                {% for delivery in failed_deliveries %}
+                <div class="notification-delivery-error"><strong>{{ delivery.label }}</strong><span>{{ delivery.error }}</span></div>
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+            {% else %}
+            <span class="notification-agent-badge legacy {{ 'good' if row.event.delivered else 'warn' }}">
+              {{ 'Delivered' if row.event.delivered else 'Failed' }}
+            </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No notification events found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "partials/pagination.html" %}
+</section>
 {% endblock %}

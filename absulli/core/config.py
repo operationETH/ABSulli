@@ -3,7 +3,7 @@ from pathlib import Path
 import logging
 import secrets
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     )
     cors_allowed_headers: str = Field(
         default=(
-            "Authorization,Content-Type,X-Absulli-Api-Token,"
+            "Authorization,Content-Type,X-API-Key,X-Absulli-Api-Token,"
             "X-Absulli-Metrics-Token,X-CSRF-Token"
         ),
         alias="ABSULLI_CORS_ALLOWED_HEADERS",
@@ -81,7 +81,11 @@ class Settings(BaseSettings):
     auth_login_window_seconds: int = Field(default=900, alias="ABSULLI_AUTH_LOGIN_WINDOW_SECONDS")
     auth_login_lockout_seconds: int = Field(default=900, alias="ABSULLI_AUTH_LOGIN_LOCKOUT_SECONDS")
 
-    api_token: SecretStr | None = Field(default=None, alias="ABSULLI_API_TOKEN")
+    api_enabled: bool = Field(default=False, alias="ABSULLI_API_ENABLED")
+    api_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ABSULLI_API_KEY", "ABSULLI_API_TOKEN"),
+    )
 
     abs_url: str = Field(default="http://audiobookshelf:13378", alias="ABS_URL")
     abs_api_key: str = Field(default="", alias="ABS_API_KEY")
@@ -405,6 +409,14 @@ class Settings(BaseSettings):
         if self.metrics_token and self.field_configured("metrics_token"):
             return self.metrics_token.get_secret_value().strip()
         return self.effective_setting("metrics_token")
+
+    @property
+    def api_enabled_from_env(self) -> bool:
+        return self.field_configured("api_enabled")
+
+    @property
+    def effective_api_enabled(self) -> bool:
+        return self.effective_bool_setting("api_enabled", default=False)
 
     @property
     def api_token_from_env(self) -> bool:

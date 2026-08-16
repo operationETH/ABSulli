@@ -91,7 +91,8 @@ def test_api_and_metrics_tokens_still_work(monkeypatch):
     monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
     monkeypatch.setenv("ABSULLI_AUTH_PASSWORD", "test123")
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
-    monkeypatch.setenv("ABSULLI_API_TOKEN", "api-token")
+    monkeypatch.setenv("ABSULLI_API_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_API_KEY", "api-token")
     monkeypatch.setenv("ABSULLI_METRICS_TOKEN", "metrics-token")
     get_settings.cache_clear()
 
@@ -111,7 +112,7 @@ def test_api_and_metrics_tokens_still_work(monkeypatch):
     assert client.get("/api/status").status_code == 401
     assert client.get("/metrics").status_code == 401
 
-    api_response = client.get("/api/status", headers={"Authorization": "Bearer api-token"})
+    api_response = client.get("/api/status", headers={"X-API-Key": "api-token"})
     assert api_response.status_code == 200
 
     metrics_response = client.get("/metrics", headers={"Authorization": "Bearer metrics-token"})
@@ -417,7 +418,8 @@ def test_revoke_sessions_endpoint_requires_api_token(monkeypatch):
     monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
     monkeypatch.setenv("ABSULLI_AUTH_PASSWORD", "test123")
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
-    monkeypatch.setenv("ABSULLI_API_TOKEN", "api-token")
+    monkeypatch.setenv("ABSULLI_API_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_API_KEY", "api-token")
     get_settings.cache_clear()
 
     import absulli.web.api as api
@@ -442,7 +444,7 @@ def test_revoke_sessions_endpoint_requires_api_token(monkeypatch):
 
     response = client.post(
         "/api/auth/revoke-sessions",
-        headers={"Authorization": "Bearer api-token"},
+        headers={"X-API-Key": "api-token"},
     )
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "revoked_sessions": True}
