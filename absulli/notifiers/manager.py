@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from sqlalchemy.orm import Session
@@ -27,6 +28,14 @@ NOTIFICATION_EVENT_SETTINGS = {
     "new_book": "notify_new_book",
     "new_podcast": "notify_new_podcast",
     "new_podcast_episode": "notify_new_podcast_episode",
+}
+
+LIBRARY_SCOPED_EVENT_TYPES = {
+    "playback_start",
+    "playback_stop",
+    "new_book",
+    "new_podcast",
+    "new_podcast_episode",
 }
 
 NOTIFICATION_AGENT_IDS = (
@@ -68,6 +77,24 @@ def agent_event_enabled(agent_id: str, event_type: str) -> bool:
     if value == "":
         return NOTIFICATION_EVENT_DEFAULTS.get(event_type, True)
     return _bool_value(value)
+
+
+def agent_library_enabled(agent_id: str, event_type: str, library_id: str = "") -> bool:
+    if event_type not in LIBRARY_SCOPED_EVENT_TYPES:
+        return True
+    value = setup_state.get_setup_setting(f"{agent_id}_notification_libraries", "")
+    if value in {"", "*"}:
+        return True
+    try:
+        selected = json.loads(value)
+    except (TypeError, ValueError):
+        return True
+    if not isinstance(selected, list):
+        return True
+    library_id = str(library_id or "").strip()
+    if not library_id:
+        return False
+    return library_id in {str(item) for item in selected if item}
 
 
 def event_enabled(event_type: str) -> bool:
@@ -153,11 +180,19 @@ class NotificationManager:
     def agents(self):
         return [agent for _agent_id, agent in self.named_agents()]
 
-    async def notify(self, db: Session, event_type: str, title: str, body: str) -> None:
+    async def notify(
+        self,
+        db: Session,
+        event_type: str,
+        title: str,
+        body: str,
+        library_id: str = "",
+    ) -> None:
         agents = [
             (agent_id, agent)
             for agent_id, agent in self.named_agents()
             if agent_event_enabled(agent_id, event_type)
+            and agent_library_enabled(agent_id, event_type, library_id)
         ]
         if not agents:
             return

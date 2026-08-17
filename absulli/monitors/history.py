@@ -53,7 +53,13 @@ class HistoryMonitor:
             library_name = book.get("library_name") or "Audiobookshelf"
             body = f"{title} by {author} was added to {library_name}."
             try:
-                await self.notifier.notify(db, "new_book", "New book added", body)
+                await self.notifier.notify(
+                    db,
+                    "new_book",
+                    "New book added",
+                    body,
+                    library_id=str(book.get("library_id") or ""),
+                )
             except Exception as exc:
                 log.warning("New book notification failed for %s: %s", title, exc)
 
@@ -84,7 +90,13 @@ class HistoryMonitor:
             library_name = podcast.get("library_name") or "Audiobookshelf"
             body = f"{title} by {author} was added to {library_name}."
             try:
-                await self.notifier.notify(db, "new_podcast", "New podcast added", body)
+                await self.notifier.notify(
+                    db,
+                    "new_podcast",
+                    "New podcast added",
+                    body,
+                    library_id=str(podcast.get("library_id") or ""),
+                )
             except Exception as exc:
                 log.warning("New podcast notification failed for %s: %s", title, exc)
 
@@ -134,7 +146,13 @@ class HistoryMonitor:
             library_name = episode.get("library_name") or "Audiobookshelf"
             body = f"{podcast_title} - {episode_title} was added to {library_name}."
             try:
-                await self.notifier.notify(db, "new_podcast_episode", "New podcast episode added", body)
+                await self.notifier.notify(
+                    db,
+                    "new_podcast_episode",
+                    "New podcast episode added",
+                    body,
+                    library_id=str(episode.get("library_id") or ""),
+                )
             except Exception as exc:
                 log.warning("New podcast episode notification failed for %s: %s", episode_title, exc)
 
@@ -172,6 +190,7 @@ class HistoryMonitor:
                             "podcast_title": podcast_title,
                             "episode_title": str(episode.get("title") or "Unknown episode"),
                             "library_name": library.name,
+                            "library_id": library.abs_library_id,
                         }
                     )
 
@@ -460,9 +479,15 @@ class HistoryMonitor:
                     existing_map[item_id] = existing
                     imported += 1
                     if is_book_library and book_baseline_complete:
-                        new_books.append(dict(item))
+                        new_book = dict(item)
+                        new_book["library_id"] = library.abs_library_id
+                        new_book["library_name"] = library.name
+                        new_books.append(new_book)
                     if is_podcast_library and podcast_baseline_complete:
-                        new_podcasts.append(dict(item))
+                        new_podcast = dict(item)
+                        new_podcast["library_id"] = library.abs_library_id
+                        new_podcast["library_name"] = library.name
+                        new_podcasts.append(new_podcast)
 
             if is_book_library and full_library_loaded and not book_baseline_complete:
                 self._mark_new_book_baseline_complete(db, library.abs_library_id)

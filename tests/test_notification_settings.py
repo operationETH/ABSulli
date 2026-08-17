@@ -2,12 +2,13 @@ import asyncio
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.datastructures import FormData
 
 import absulli.core.setup_state as setup_state
 import absulli.web.routes as web_routes
 import absulli.web.settings as web_settings
 from absulli.core.config import Settings, get_settings
-from absulli.database.models import NotificationDelivery, NotificationEvent
+from absulli.database.models import Library, NotificationDelivery, NotificationEvent
 from absulli.notifiers.manager import NotificationManager
 from absulli.web.routes import router as web_router
 
@@ -632,3 +633,219 @@ def test_notification_agent_failure_log_redacts_secret_url(monkeypatch, caplog):
     assert response.status_code == 502
     assert "401 Unauthorized" in caplog.text
     assert "secret-token" not in caplog.text
+
+
+def test_notification_library_scope_defaults_to_all_libraries(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    libraries = [
+        Library(abs_library_id="lib-books", name="Audiobooks", media_type="book"),
+        Library(abs_library_id="lib-podcasts", name="Podcasts", media_type="podcast"),
+    ]
+
+    context = web_settings.notification_library_scope_context("discord", libraries)
+
+    assert context["all_libraries"] is True
+    assert [library["selected"] for library in context["libraries"]] == [False, False]
+
+
+def test_notification_library_scope_reads_saved_library_ids(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {"discord_notification_libraries": '["lib-podcasts"]'},
+    )
+    assert client
+    libraries = [
+        Library(abs_library_id="lib-books", name="Audiobooks", media_type="book"),
+        Library(abs_library_id="lib-podcasts", name="Podcasts", media_type="podcast"),
+    ]
+
+    context = web_settings.notification_library_scope_context("discord", libraries)
+
+    assert context["all_libraries"] is False
+    assert [library["selected"] for library in context["libraries"]] == [False, True]
+
+
+def test_notification_library_value_from_form_keeps_only_detected_libraries(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    libraries = [
+        Library(abs_library_id="lib-books", name="Audiobooks", media_type="book"),
+        Library(abs_library_id="lib-podcasts", name="Podcasts", media_type="podcast"),
+    ]
+    form = FormData(
+        [
+            ("discord_library_scope_present", "1"),
+            ("discord_library_ids", "lib-podcasts"),
+            ("discord_library_ids", "unknown-library"),
+        ]
+    )
+
+    value = web_settings.notification_library_value_from_form("discord", form, libraries)
+
+    assert value == '["lib-podcasts"]'
+
+
+def test_notification_library_value_from_form_all_libraries_uses_wildcard(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    form = FormData(
+        [
+            ("discord_library_scope_present", "1"),
+            ("discord_all_libraries", "on"),
+        ]
+    )
+
+    value = web_settings.notification_library_value_from_form("discord", form, [])
+
+    assert value == "*"
+
+
+def test_notification_manager_filters_agents_by_library(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            "gotify_notify_new_book": "true",
+            "discord_notify_new_book": "true",
+            "gotify_notification_libraries": '["lib-books"]',
+            "discord_notification_libraries": '["lib-other"]',
+        },
+    )
+    assert client
+    calls = []
+
+    class FakeAgent:
+        def __init__(self, name):
+            self.name = name
+
+        async def send(self, title, message, extra=None):
+            calls.append((self.name, title, message, extra))
+
+    class FakeDb:
+        def __init__(self):
+            self.events = []
+            self.deliveries = []
+
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+                self.events.append(record)
+            if isinstance(record, NotificationDelivery):
+                self.deliveries.append(record)
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(
+        manager,
+        "named_agents",
+        lambda: [("gotify", FakeAgent("gotify")), ("discord", FakeAgent("discord"))],
+    )
+    db = FakeDb()
+
+    asyncio.run(
+        manager.notify(
+            db,
+            "new_book",
+            "New book added",
+            "Example",
+            library_id="lib-books",
+        )
+    )
+
+    assert calls == [
+        (
+            "gotify",
+            "New book added",
+            "Example",
+            {"event_type": "new_book"},
+        )
+    ]
+    assert [delivery.agent for delivery in db.deliveries] == ["gotify"]
+
+
+def test_notification_manager_library_scope_does_not_filter_connection_events(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            "discord_notify_abs_connection_failed": "true",
+            "discord_notification_libraries": "[]",
+        },
+    )
+    assert client
+    calls = []
+
+    class FakeAgent:
+        async def send(self, title, message, extra=None):
+            calls.append((title, message, extra))
+
+    class FakeDb:
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(manager, "named_agents", lambda: [("discord", FakeAgent())])
+
+    asyncio.run(
+        manager.notify(
+            FakeDb(),
+            "abs_connection_failed",
+            "Audiobookshelf connection failed",
+            "Connection failed",
+        )
+    )
+
+    assert calls == [
+        (
+            "Audiobookshelf connection failed",
+            "Connection failed",
+            {"event_type": "abs_connection_failed"},
+        )
+    ]
+
+
+def test_notification_manager_scoped_library_event_requires_library_id(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            "discord_notify_new_book": "true",
+            "discord_notification_libraries": '["lib-books"]',
+        },
+    )
+    assert client
+    calls = []
+
+    class FakeAgent:
+        async def send(self, title, message, extra=None):
+            calls.append((title, message, extra))
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(manager, "named_agents", lambda: [("discord", FakeAgent())])
+
+    class FakeDb:
+        def add(self, record):
+            raise AssertionError("No notification record should be created")
+
+        def commit(self):
+            raise AssertionError("No notification commit should occur")
+
+    asyncio.run(manager.notify(FakeDb(), "new_book", "New book added", "Example"))
+
+    assert calls == []
+
+
+def test_notification_library_value_from_legacy_form_keeps_existing_scope(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {"discord_notification_libraries": '["lib-books"]'},
+    )
+    assert client
+
+    value = web_settings.notification_library_value_from_form("discord", FormData(), [])
+
+    assert value == '["lib-books"]'

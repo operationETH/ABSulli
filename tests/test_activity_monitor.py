@@ -23,8 +23,11 @@ class FakeNotifier:
     def __init__(self):
         self.events = []
 
-    async def notify(self, db, event_type, title, body):
-        self.events.append({"event_type": event_type, "title": title, "body": body})
+    async def notify(self, db, event_type, title, body, library_id=""):
+        event = {"event_type": event_type, "title": title, "body": body}
+        if library_id:
+            event["library_id"] = library_id
+        self.events.append(event)
 
 
 def make_db():
@@ -96,6 +99,7 @@ def test_poll_creates_active_session_enriches_from_db_and_notifies_start():
             "event_type": "playback_start",
             "title": "Friendly Name started listening",
             "body": "Transfer of Power",
+            "library_id": "lib-1",
         }
     ]
     db.close()

@@ -343,6 +343,23 @@ function initializeGeneralSettingsTest(root = document) {
 }
 
 function initializeNotificationAgentSettings(root = document) {
+  const libraryScopes = Array.from(root.querySelectorAll('[data-library-scope]'));
+  libraryScopes.forEach((scope) => {
+    const allLibraries = scope.querySelector('[data-all-libraries]');
+    const libraryOptions = Array.from(scope.querySelectorAll('[data-library-option]'));
+    if (!allLibraries) return;
+
+    const syncLibraryOptions = () => {
+      libraryOptions.forEach((input) => {
+        input.disabled = allLibraries.checked;
+        input.closest('.event-option')?.classList.toggle('is-disabled', allLibraries.checked);
+      });
+    };
+
+    allLibraries.addEventListener('change', syncLibraryOptions);
+    syncLibraryOptions();
+  });
+
   const buttons = Array.from(root.querySelectorAll('[data-agent-test]'));
   buttons.forEach((button) => {
     const agentId = button.dataset.agentTest;

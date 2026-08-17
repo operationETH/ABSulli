@@ -641,8 +641,8 @@ class FakeNotifier:
     def __init__(self):
         self.calls = []
 
-    async def notify(self, db, event_type, title, body):
-        self.calls.append((event_type, title, body))
+    async def notify(self, db, event_type, title, body, library_id=""):
+        self.calls.append((event_type, title, body, library_id))
 
 
 def test_new_book_notifications_start_after_silent_library_baseline():
@@ -687,6 +687,7 @@ def test_new_book_notifications_start_after_silent_library_baseline():
             "new_book",
             "New book added",
             "American Assassin by Vince Flynn was added to Audiobooks.",
+            "lib-1",
         )
     ]
     db.close()
@@ -744,6 +745,7 @@ def test_new_podcast_notifications_start_after_silent_library_baseline():
             "new_podcast",
             "New podcast added",
             "Darknet Diaries by Jack Rhysider was added to Podcasts.",
+            "lib-podcast",
         )
     ]
     db.close()
@@ -806,6 +808,7 @@ def test_new_podcast_episode_notifications_start_after_silent_episode_baseline(m
             "new_podcast_episode",
             "New podcast episode added",
             "The History of English Podcast - Episode 12: Early Greek, Hittite and the Trojan War (Extended Version) was added to Podcasts.",
+            "lib-podcast",
         )
     ]
     db.close()
@@ -852,6 +855,7 @@ def test_new_podcast_episode_notifications_use_exact_episode_title(monkeypatch):
             "new_podcast_episode",
             "New podcast episode added",
             "Crime Junkie - MURDERED: Joyce LePage Part 2 was added to podcasts test.",
+            "lib-podcast",
         )
     ]
     db.close()

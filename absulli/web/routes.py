@@ -116,6 +116,7 @@ from absulli.web.settings import (
     network_settings_context,
     network_values_from_form,
     notification_events_context,
+    notification_library_value_from_form,
     regenerate_api_token,
     regenerate_metrics_token,
     settings_field_from_env,
@@ -1206,7 +1207,8 @@ def graphs(request: Request, db: Session = Depends(get_db)):
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, db: Session = Depends(get_db)):
     settings = get_settings()
-    agent_context = agent_settings_context(settings)
+    libraries = db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all()
+    agent_context = agent_settings_context(settings, libraries)
     safe = {
         "ABS_URL": settings.effective_abs_url,
         "ABS_POLL_INTERVAL": settings.effective_abs_poll_interval,
@@ -1417,7 +1419,7 @@ async def settings_general_test(request: Request):
 
 
 @router.post("/settings/notifications/{agent_id}", response_class=HTMLResponse)
-async def settings_notification_agent_save(request: Request, agent_id: str):
+async def settings_notification_agent_save(request: Request, agent_id: str, db: Session = Depends(get_db)):
     if agent_id not in AGENT_FIELD_CONFIGS:
         raise HTTPException(status_code=404, detail="Unknown notification agent")
 
@@ -1435,6 +1437,8 @@ async def settings_notification_agent_save(request: Request, agent_id: str):
         values[setting_name] = "true" if form.get(setting_name) == "on" else "false"
 
     values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"
+    libraries = db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all()
+    values[f"{agent_id}_notification_libraries"] = notification_library_value_from_form(agent_id, form, libraries)
 
     if not is_enabled:
         for field in AGENT_FIELD_CONFIGS[agent_id]["fields"]:

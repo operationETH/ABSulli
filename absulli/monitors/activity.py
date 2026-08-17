@@ -88,6 +88,7 @@ class ActivityMonitor:
                     "playback_start",
                     f"{session['username']} started listening",
                     session["title"],
+                    library_id=session.get("library_id") or "",
                 )
 
         stale_cutoff = now - timedelta(seconds=45)
@@ -105,6 +106,7 @@ class ActivityMonitor:
                 "playback_stop",
                 f"{row.username} stopped listening",
                 row.title,
+                library_id=row.library_id or "",
             )
 
         db.commit()

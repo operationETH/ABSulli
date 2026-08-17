@@ -363,6 +363,30 @@
         </div>
       </div>
 
+      <div class="notification-events notification-libraries">
+        <input type="hidden" name="{{ agent.id }}_library_scope_present" value="1">
+        <h3>Libraries</h3>
+        <p class="form-help">Choose the Audiobookshelf libraries this agent should monitor for playback and new media notifications. Connection notifications apply globally.</p>
+        <div class="event-list" data-library-scope>
+          <label class="event-option">
+            <input type="checkbox" name="{{ agent.id }}_all_libraries" data-all-libraries {% if agent.library_scope.all_libraries %}checked{% endif %}>
+            <span>
+              <strong>All libraries</strong>
+              <small>Include all detected libraries, including libraries added later.</small>
+            </span>
+          </label>
+          {% for library in agent.library_scope.libraries %}
+          <label class="event-option{% if agent.library_scope.all_libraries %} is-disabled{% endif %}">
+            <input type="checkbox" name="{{ agent.id }}_library_ids" value="{{ library.id }}" data-library-option {% if library.selected %}checked{% endif %} {% if agent.library_scope.all_libraries %}disabled{% endif %}>
+            <span>
+              <strong>{{ library.name }}</strong>
+              <small>{{ library.media_type|title }}</small>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
       <div id="{{ agent.id }}-test-result" class="setup-test-result" hidden></div>
       <div class="form-actions">
         <button type="button" class="secondary" data-agent-test="{{ agent.id }}">Test</button>

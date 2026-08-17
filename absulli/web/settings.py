@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import secrets
@@ -369,6 +370,49 @@ def bool_setting(name: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def notification_library_scope_context(agent_id: str, libraries: list[Library]) -> dict[str, object]:
+    value = setup_state.get_setup_setting(f"{agent_id}_notification_libraries", "")
+    all_libraries = value in {"", "*"}
+    selected: set[str] = set()
+    if not all_libraries:
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError):
+            decoded = None
+        if isinstance(decoded, list):
+            selected = {str(item) for item in decoded if item}
+        else:
+            all_libraries = True
+    return {
+        "all_libraries": all_libraries,
+        "libraries": [
+            {
+                "id": library.abs_library_id,
+                "name": library.name or library.abs_library_id,
+                "media_type": library.media_type or "unknown",
+                "selected": library.abs_library_id in selected,
+            }
+            for library in libraries
+        ],
+    }
+
+
+def notification_library_value_from_form(agent_id: str, form, libraries: list[Library]) -> str:
+    if form.get(f"{agent_id}_library_scope_present") != "1":
+        return setup_state.get_setup_setting(f"{agent_id}_notification_libraries", "") or "*"
+    if form.get(f"{agent_id}_all_libraries") == "on":
+        return "*"
+    known_ids = {library.abs_library_id for library in libraries}
+    selected = sorted(
+        {
+            str(value).strip()
+            for value in form.getlist(f"{agent_id}_library_ids")
+            if str(value).strip() in known_ids
+        }
+    )
+    return json.dumps(selected)
+
+
 def notification_events_context(agent_id: str) -> list[dict[str, object]]:
     events = []
     for event_type, meta in NOTIFICATION_EVENT_SETTINGS.items():
@@ -675,8 +719,9 @@ def saved_field_value(settings, field_name: str, field: dict[str, object]) -> st
     return setup_state.get_setup_setting(field_name, "")
 
 
-def agent_settings_context(settings) -> list[dict[str, object]]:
+def agent_settings_context(settings, libraries: list[Library] | None = None) -> list[dict[str, object]]:
     agents = []
+    libraries = libraries or []
     for agent_id, config in AGENT_FIELD_CONFIGS.items():
         fields = []
         configured = True
@@ -705,6 +750,7 @@ def agent_settings_context(settings) -> list[dict[str, object]]:
                 "env_managed": env_managed,
                 "fields": fields,
                 "notification_events": notification_events_context(agent_id),
+                "library_scope": notification_library_scope_context(agent_id, libraries),
             }
         )
     return agents
