@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -8,6 +9,7 @@ from absulli.core.config import get_settings
 from absulli.notifiers.agents import (
     DiscordAgent,
     EmailAgent,
+    GotifyAgent,
     NtfyAgent,
     PushbulletAgent,
     PushoverAgent,
@@ -91,7 +93,7 @@ def test_notification_manager_env_values_win(monkeypatch):
 @pytest.mark.parametrize(
     ("agent", "expected_url", "expected_json"),
     [
-        (DiscordAgent("https://discord.example/webhook"), "https://discord.example/webhook", {"username": "ABSulli", "embeds": [{"title": "Title", "description": "Body", "color": 14006049}]}),
+        (DiscordAgent("https://discord.example/webhook"), "https://discord.example/webhook", {"username": "ABSulli", "allowed_mentions": {"parse": []}, "embeds": [{"title": "Title", "description": "Body", "color": 14006049}]}),
         (SlackAgent("https://slack.example/webhook"), "https://slack.example/webhook", {"text": "*Title*\nBody"}),
         (WebhookAgent("https://example.com/webhook"), "https://example.com/webhook", {"title": "Title", "message": "Body", "extra": {"event_type": "test"}}),
     ],
@@ -124,6 +126,223 @@ def test_webhook_style_agents_send_expected_payloads(monkeypatch, agent, expecte
     assert calls[0][0] == expected_url
     assert calls[0][1]["json"] == expected_json
 
+
+
+
+
+def test_discord_agent_sends_rich_media_embed(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, content=b"cover-bytes", content_type="image/webp"):
+            self.content = content
+            self.headers = {"content-type": content_type}
+
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, **kwargs):
+            calls.append(("GET", url, kwargs))
+            return FakeResponse()
+
+        async def post(self, url, **kwargs):
+            calls.append(("POST", url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        DiscordAgent("https://discord.example/webhook").send(
+            "New book: Bloody Jack",
+            "Bloody Jack\nby L. A. Meyer",
+            {
+                "cover_url": "https://absulli.example/notification-covers/items/book-1?token=abc",
+                "click_url": "https://abs.example/item/book-1",
+            },
+        )
+    )
+
+    assert calls[0][0:2] == ("GET", "https://absulli.example/notification-covers/items/book-1?token=abc")
+    post = calls[1]
+    assert post[0:2] == ("POST", "https://discord.example/webhook")
+    payload = json.loads(post[2]["data"]["payload_json"])
+    assert payload == {
+        "username": "ABSulli",
+        "allowed_mentions": {"parse": []},
+        "embeds": [
+            {
+                "title": "New book: Bloody Jack",
+                "description": "Bloody Jack\nby L. A. Meyer\n\n[Open in Audiobookshelf](https://abs.example/item/book-1)",
+                "color": 14006049,
+                "url": "https://abs.example/item/book-1",
+                "thumbnail": {"url": "attachment://cover.webp"},
+            }
+        ],
+    }
+    assert post[2]["files"]["files[0]"] == ("cover.webp", b"cover-bytes", "image/webp")
+
+
+def test_discord_agent_falls_back_to_cover_url_when_download_fails(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, **kwargs):
+            raise httpx.ConnectError("unreachable")
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        DiscordAgent("https://discord.example/webhook").send(
+            "Title",
+            "Body",
+            {"cover_url": "https://absulli.example/cover.webp"},
+        )
+    )
+
+    assert calls[0][1]["json"]["embeds"][0]["thumbnail"] == {"url": "https://absulli.example/cover.webp"}
+
+def test_gotify_agent_sends_rich_media_payload(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        GotifyAgent("https://gotify.example", "token").send(
+            "New book added",
+            "A book was added.",
+            {
+                "cover_url": "https://absulli.example/notification-covers/items/book-1?token=abc",
+                "click_url": "https://abs.example/item/book-1",
+            },
+        )
+    )
+
+    payload = calls[0][1]["json"]
+    assert payload["message"] == (
+        "A book was added.\n\n"
+        "[Open in Audiobookshelf](https://abs.example/item/book-1)\n\n"
+        "![](https://absulli.example/notification-covers/items/book-1?token=abc)"
+    )
+    assert payload["extras"] == {
+        "client::notification": {
+            "bigImageUrl": "https://absulli.example/notification-covers/items/book-1?token=abc",
+            "click": {"url": "https://abs.example/item/book-1"},
+        },
+        "client::display": {"contentType": "text/markdown"},
+    }
+
+
+def test_gotify_agent_preserves_template_line_breaks_in_markdown(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        GotifyAgent("https://gotify.example", "token").send(
+            "Playback started",
+            "The Spy and the Traitor\nby Ben Macintyre\n\nLibrary: Audiobooks",
+            {"click_url": "https://abs.example/item/book-1"},
+        )
+    )
+
+    assert calls[0][1]["json"]["message"] == (
+        "The Spy and the Traitor  \n"
+        "by Ben Macintyre\n\n"
+        "Library: Audiobooks\n\n"
+        "[Open in Audiobookshelf](https://abs.example/item/book-1)"
+    )
+
+
+def test_gotify_agent_uses_plain_text_without_rich_media(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(GotifyAgent("https://gotify.example", "token").send("Title", "Body", {"event_type": "test"}))
+
+    assert calls[0][1]["json"]["message"] == "Body"
+    assert calls[0][1]["json"]["extras"] == {"client::display": {"contentType": "text/plain"}}
 
 def test_ntfy_agent_sends_topic_post_with_token(monkeypatch):
     calls = []
@@ -197,6 +416,53 @@ def test_push_services_send_expected_payloads(monkeypatch):
         "https://api.pushbullet.com/v2/pushes",
         {"headers": {"Access-Token": "push-token"}, "json": {"type": "note", "title": "Title", "body": "Body"}},
     )
+
+
+def test_pushbullet_agent_uses_link_push_when_click_url_is_available(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        PushbulletAgent("push-token").send(
+            "Title",
+            "Body",
+            {"click_url": "https://abs.example/item/123"},
+        )
+    )
+
+    assert calls == [
+        (
+            "https://api.pushbullet.com/v2/pushes",
+            {
+                "headers": {"Access-Token": "push-token"},
+                "json": {
+                    "type": "link",
+                    "title": "Title",
+                    "body": "Body",
+                    "url": "https://abs.example/item/123",
+                },
+            },
+        )
+    ]
 
 
 def test_email_agent_uses_smtp_ssl_and_sends_message(monkeypatch):
@@ -310,3 +576,112 @@ def test_notification_manager_builds_saved_email_agent(monkeypatch):
     assert agents[0].username == "smtp-user"
     assert agents[0].password == "smtp-pass"
     assert agents[0].use_tls is True
+
+
+def test_discord_agent_truncates_embed_title_and_description(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        DiscordAgent("https://discord.example/webhook").send(
+            "T" * 300,
+            "B" * 5000,
+            {"click_url": "https://abs.example/item/book-1"},
+        )
+    )
+
+    payload = calls[0][1]["json"]
+    embed = payload["embeds"][0]
+    assert len(embed["title"]) == 256
+    assert embed["title"].endswith("...")
+    assert len(embed["description"]) <= 4096
+    assert embed["description"].endswith("[Open in Audiobookshelf](https://abs.example/item/book-1)")
+    assert payload["allowed_mentions"] == {"parse": []}
+
+
+def test_discord_agent_disables_mentions(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(DiscordAgent("https://discord.example/webhook").send("@everyone", "<@123> @here"))
+
+    payload = calls[0][1]["json"]
+    assert payload["allowed_mentions"] == {"parse": []}
+    assert payload["embeds"][0]["title"] == "@everyone"
+    assert payload["embeds"][0]["description"] == "<@123> @here"
+
+
+def test_webhook_agent_sends_custom_payload_and_headers(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    agent = WebhookAgent("https://example.com/webhook", {"Authorization": "Bearer secret"})
+    payload = {"event": "new_book", "media": {"title": "Example"}}
+
+    asyncio.run(agent.send("Title", "Body", {"event_type": "new_book", "webhook_payload": payload}))
+
+    assert calls == [
+        (
+            "https://example.com/webhook",
+            {
+                "headers": {"Authorization": "Bearer secret"},
+                "json": payload,
+            },
+        )
+    ]

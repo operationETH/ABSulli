@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import html
+import re
 
 from absulli.core.time import utcnow
 from typing import Any
@@ -46,6 +48,30 @@ def safe_text(value: Any, *preferred_keys: str) -> str:
         return ", ".join(part for part in parts if part)
     return str(value)
 
+
+
+
+def display_language(value: Any) -> str:
+    language = safe_text(value).strip()
+    if not language:
+        return ""
+    names = {
+        "en": "English",
+        "en-us": "English (US)",
+        "en-gb": "English (UK)",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+        "it": "Italian",
+        "pt": "Portuguese",
+        "nl": "Dutch",
+        "pl": "Polish",
+        "ja": "Japanese",
+        "ko": "Korean",
+        "zh": "Chinese",
+        "ru": "Russian",
+    }
+    return names.get(language.casefold(), language)
 
 def parse_ts(value: Any) -> datetime | None:
     if not value:
@@ -305,6 +331,89 @@ def normalize_library_payload(payload: dict[str, Any] | list[Any]) -> list[dict[
     return [row for row in normalized if row["abs_library_id"]]
 
 
+
+def _plain_text(value: Any) -> str:
+    raw = safe_text(value)
+    if not raw:
+        return ""
+    raw = re.sub(r"<br\s*/?>", "\n", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"</p\s*>", "\n\n", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    raw = html.unescape(raw)
+    raw = re.sub(r"[ \t]+", " ", raw)
+    raw = re.sub(r"\n[ \t]+", "\n", raw)
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+    return raw.strip()
+
+
+def normalize_item_notification_context(payload: dict[str, Any]) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {}
+    row = payload.get("libraryItem") if isinstance(payload.get("libraryItem"), dict) else payload
+    media = row.get("media") or {}
+    metadata = media.get("metadata") or row.get("metadata") or {}
+    series = ""
+    series_items = metadata.get("series") or media.get("series") or row.get("series")
+    if isinstance(series_items, list) and series_items:
+        first = series_items[0]
+        series = safe_text(first.get("name") or first.get("series") or "") if isinstance(first, dict) else safe_text(first)
+    elif series_items:
+        series = safe_text(series_items)
+    authors = metadata.get("authors")
+    narrators = metadata.get("narrators")
+    author = extract_author(row, row, media) or safe_text(metadata.get("authorName") or metadata.get("author") or "")
+    if not author and isinstance(authors, list):
+        author = ", ".join(safe_text(item.get("name") if isinstance(item, dict) else item) for item in authors if item)
+    narrator = safe_text(metadata.get("narratorName") or metadata.get("narrator") or "")
+    if not narrator and isinstance(narrators, list):
+        narrator = ", ".join(safe_text(item.get("name") if isinstance(item, dict) else item) for item in narrators if item)
+    title = safe_text(row.get("title") or media.get("title") or metadata.get("title") or "")
+    return {
+        "title": title,
+        "subtitle": safe_text(metadata.get("subtitle") or ""),
+        "author": author,
+        "narrator": narrator,
+        "series": series,
+        "publisher": safe_text(metadata.get("publisher") or ""),
+        "description": _plain_text(metadata.get("description") or ""),
+        "isbn": safe_text(metadata.get("isbn") or ""),
+        "asin": safe_text(metadata.get("asin") or ""),
+        "language": display_language(metadata.get("language") or ""),
+        "itunes_id": safe_text(metadata.get("itunesId") or metadata.get("itunesID") or metadata.get("itunes_id") or ""),
+        "year": safe_text(metadata.get("publishedYear") or metadata.get("releaseDate") or metadata.get("publishedDate") or ""),
+        "podcast": safe_text(metadata.get("title") or "") if safe_text(row.get("mediaType") or row.get("type") or "").lower() == "podcast" else "",
+        "podcast_description": _plain_text(metadata.get("description") or "") if safe_text(row.get("mediaType") or row.get("type") or "").lower() == "podcast" else "",
+    }
+
+def normalize_podcast_playback_context(payload: dict[str, Any], episode_title: str = "", episode_id: str = "") -> dict[str, str]:
+    context = normalize_item_notification_context(payload)
+    if not context:
+        return {}
+    row = payload.get("libraryItem") if isinstance(payload.get("libraryItem"), dict) else payload
+    media = row.get("media") or {}
+    episodes = media.get("episodes") if isinstance(media.get("episodes"), list) else []
+    wanted_id = safe_text(episode_id)
+    wanted_title = safe_text(episode_title)
+    selected = None
+    if wanted_id:
+        selected = next((episode for episode in episodes if isinstance(episode, dict) and safe_text(episode.get("id")) == wanted_id), None)
+    if selected is None and wanted_title:
+        folded = wanted_title.casefold()
+        selected = next((episode for episode in episodes if isinstance(episode, dict) and safe_text(episode.get("title")).casefold() == folded), None)
+    podcast_title = context.get("podcast") or context.get("title") or ""
+    episode_name = safe_text(selected.get("title") if isinstance(selected, dict) else wanted_title) or wanted_title
+    episode_description = _plain_text(
+        (selected.get("description") or selected.get("subtitle") or "") if isinstance(selected, dict) else ""
+    )
+    context["podcast"] = podcast_title
+    context["podcast_description"] = context.get("podcast_description") or context.get("description") or ""
+    context["episode"] = episode_name
+    context["episode_description"] = episode_description
+    context["title"] = episode_name or podcast_title
+    context["description"] = episode_description
+    return context
+
+
 def normalize_media_item_payload(payload: dict[str, Any] | list[Any], library_id: str = "", library_name: str = "") -> list[dict[str, Any]]:
     rows = payload if isinstance(payload, list) else payload.get("results") or payload.get("items") or payload.get("libraryItems") or []
     normalized = []
@@ -336,6 +445,13 @@ def normalize_media_item_payload(payload: dict[str, Any] | list[Any], library_id
                 "author_id": extract_author_id(row, row, media),
                 "narrator": safe_text(metadata.get("narratorName") or metadata.get("narrator") or ""),
                 "series": series,
+                "subtitle": safe_text(metadata.get("subtitle") or ""),
+                "publisher": safe_text(metadata.get("publisher") or ""),
+                "description": _plain_text(metadata.get("description") or ""),
+                "isbn": safe_text(metadata.get("isbn") or ""),
+                "asin": safe_text(metadata.get("asin") or ""),
+                "language": display_language(metadata.get("language") or ""),
+                "itunes_id": safe_text(metadata.get("itunesId") or metadata.get("itunesID") or metadata.get("itunes_id") or ""),
                 "year": safe_text(metadata.get("publishedYear") or metadata.get("releaseDate") or metadata.get("publishedDate") or ""),
                 "duration": safe_float(media.get("duration") or row.get("duration")),
                 "size_bytes": safe_float(row.get("size") or row.get("sizeBytes") or media.get("size")),

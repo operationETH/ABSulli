@@ -5,7 +5,7 @@ from datetime import timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from absulli.core.config import Settings
-from absulli.core.setup_state import is_setup_complete, set_setup_setting
+from absulli.core.setup_state import get_setup_setting, is_setup_complete, set_setup_setting
 from absulli.core.time import utcnow, utcnow_iso
 from absulli.database.models import LoginLog
 from absulli.database.session import SessionLocal
@@ -34,15 +34,31 @@ class AbsulliScheduler:
         except Exception:
             return False
 
-    def _record_abs_reachable(self, reachable: bool) -> None:
+    async def _record_abs_reachable(self, db, reachable: bool) -> None:
         try:
-            set_setup_setting("abs_reachable", "true" if reachable else "false")
+            previous = get_setup_setting("abs_reachable", "")
+            current = "true" if reachable else "false"
+            set_setup_setting("abs_reachable", current)
             if reachable:
                 set_setup_setting("abs_last_success_at", utcnow_iso())
             else:
                 set_setup_setting("abs_last_failure_at", utcnow_iso())
+            if previous == "true" and not reachable:
+                await self.notifier.notify(
+                    db,
+                    "abs_connection_failed",
+                    "Audiobookshelf connection failed",
+                    "ABSulli cannot reach Audiobookshelf.",
+                )
+            elif previous == "false" and reachable:
+                await self.notifier.notify(
+                    db,
+                    "abs_connection_restored",
+                    "Audiobookshelf connection restored",
+                    "ABSulli can reach Audiobookshelf again.",
+                )
         except Exception as exc:
-            log.debug("Failed to update ABS reachability cache: %s", exc)
+            log.debug("Failed to update ABS reachability state: %s", exc)
 
     async def prune_login_logs(self) -> None:
         cutoff = utcnow() - timedelta(days=90)
@@ -65,10 +81,10 @@ class AbsulliScheduler:
         db = SessionLocal()
         try:
             count = await self.activity.poll(db)
-            self._record_abs_reachable(True)
+            await self._record_abs_reachable(db, True)
             log.debug("Activity poll complete: %s active", count)
         except Exception as exc:
-            self._record_abs_reachable(False)
+            await self._record_abs_reachable(db, False)
             log.warning("Activity poll failed: %s", exc)
         finally:
             db.close()
@@ -81,10 +97,10 @@ class AbsulliScheduler:
         db = SessionLocal()
         try:
             imported = await self.history.poll(db)
-            self._record_abs_reachable(True)
+            await self._record_abs_reachable(db, True)
             log.debug("History poll complete: %s imported", imported)
         except Exception as exc:
-            self._record_abs_reachable(False)
+            await self._record_abs_reachable(db, False)
             log.warning("History poll failed: %s", exc)
         finally:
             db.close()

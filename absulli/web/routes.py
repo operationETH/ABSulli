@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 import logging
 import re
 from urllib.parse import quote, urlencode
@@ -23,7 +24,7 @@ from absulli.core.cover_cache import (
 )
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent
 from absulli.database.session import get_db
-from absulli.notifiers.manager import clean_notification_error
+from absulli.notifiers.manager import NOTIFICATION_TEMPLATE_VARIABLES, WEBHOOK_DEFAULT_PAYLOAD, clean_notification_error, render_webhook_payload, validate_notification_template, validate_webhook_json_template
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.core.security import (
@@ -45,6 +46,7 @@ from absulli.core.security import (
     rotate_session_version,
     setup_required,
     validate_csrf_token,
+    valid_notification_cover_token,
     verify_login,
 )
 from absulli.core.setup_state import get_setup_setting, set_setup_setting, set_setup_settings
@@ -604,6 +606,22 @@ async def item_cover(
         media_type=content_type,
         headers=cover_response_headers(COVER_CACHE_CONTROL, hit=False),
     )
+
+
+@router.get("/notification-covers/items/{item_id}")
+async def notification_item_cover(
+    item_id: str,
+    token: str,
+    width: int = 900,
+    height: int | None = None,
+    fmt: str = "webp",
+    db: Session = Depends(get_db),
+):
+    if not valid_notification_cover_token(item_id, token):
+        raise HTTPException(status_code=404, detail="Cover not found")
+    response = await item_cover(item_id=item_id, width=width, height=height, fmt=fmt, db=db)
+    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    return response
 
 
 @router.get("/covers/authors/by-name/{author_name:path}")
@@ -1418,6 +1436,24 @@ async def settings_general_test(request: Request):
     return {"ok": True, "message": "Audiobookshelf connection successful."}
 
 
+def webhook_custom_headers_from_form(form) -> str:
+    names = [str(value or "").strip() for value in form.getlist("webhook_custom_header_name")]
+    values = [str(value or "").strip() for value in form.getlist("webhook_custom_header_value")]
+    if len(names) != len(values):
+        raise ValueError("Webhook custom headers are incomplete")
+    headers = {}
+    authorization = str(form.get("webhook_authorization_header") or "").strip()
+    for name, value in zip(names, values):
+        if not name and not value:
+            continue
+        if not name or not value:
+            raise ValueError("Each webhook custom header needs both a name and value")
+        if name.lower() == "authorization" and authorization:
+            raise ValueError("Cannot use Authorization Header and a custom Authorization header together")
+        headers[name] = value
+    return json.dumps(headers, separators=(",", ":")) if headers else ""
+
+
 @router.post("/settings/notifications/{agent_id}", response_class=HTMLResponse)
 async def settings_notification_agent_save(request: Request, agent_id: str, db: Session = Depends(get_db)):
     if agent_id not in AGENT_FIELD_CONFIGS:
@@ -1437,8 +1473,34 @@ async def settings_notification_agent_save(request: Request, agent_id: str, db: 
         values[setting_name] = "true" if form.get(setting_name) == "on" else "false"
 
     values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"
+    values[f"{agent_id}_advanced_open"] = "true" if form.get(f"{agent_id}_advanced_open") == "true" else "false"
     libraries = db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all()
     values[f"{agent_id}_notification_libraries"] = notification_library_value_from_form(agent_id, form, libraries)
+    if agent_id == "webhook":
+        for event_type in NOTIFICATION_EVENT_SETTINGS:
+            values[f"webhook_{event_type}_title_template"] = ""
+            values[f"webhook_{event_type}_body_template"] = ""
+    else:
+        try:
+            for event_type in NOTIFICATION_EVENT_SETTINGS:
+                title_key = f"{agent_id}_{event_type}_title_template"
+                body_key = f"{agent_id}_{event_type}_body_template"
+                values[title_key] = validate_notification_template(str(form.get(title_key) or "").strip())
+                values[body_key] = validate_notification_template(str(form.get(body_key) or "").strip())
+        except ValueError as exc:
+            return RedirectResponse(f"/settings?tab=notifications&agent={quote(agent_id)}&error={quote(str(exc))}", status_code=303)
+
+    if agent_id == "webhook":
+        try:
+            values["webhook_authorization_header"] = str(form.get("webhook_authorization_header") or "").strip()
+            values["webhook_custom_headers_json"] = webhook_custom_headers_from_form(form)
+            values["webhook_payload_template"] = validate_webhook_json_template(str(form.get("webhook_payload_template") or WEBHOOK_DEFAULT_PAYLOAD))
+            values["webhook_headers_json"] = ""
+            values["webhook_send_full_context"] = "false"
+            for event_type in NOTIFICATION_EVENT_SETTINGS:
+                values[f"webhook_{event_type}_payload_template"] = ""
+        except ValueError as exc:
+            return RedirectResponse(f"/settings?tab=notifications&agent={quote(agent_id)}&error={quote(str(exc))}", status_code=303)
 
     if not is_enabled:
         for field in AGENT_FIELD_CONFIGS[agent_id]["fields"]:
@@ -1480,6 +1542,10 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
 
     try:
         values = agent_values_from_form(get_settings(), agent_id, form)
+        if agent_id == "webhook":
+            values["webhook_authorization_header"] = str(form.get("webhook_authorization_header") or "").strip()
+            values["webhook_custom_headers_json"] = webhook_custom_headers_from_form(form)
+            values["webhook_payload_template"] = validate_webhook_json_template(str(form.get("webhook_payload_template") or WEBHOOK_DEFAULT_PAYLOAD))
     except ValueError as exc:
         return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
 
@@ -1487,10 +1553,19 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
         return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} required fields are missing."}, status_code=400)
 
     try:
+        extra = {"event_type": "test"}
+        if agent_id == "webhook":
+            test_values = {name: "test" for name in NOTIFICATION_TEMPLATE_VARIABLES}
+            test_values.update({
+                "event_type": "test",
+                "notification_title": "ABSulli test notification",
+                "notification_body": "Webhook notifications are configured correctly.",
+            })
+            extra["webhook_payload"] = render_webhook_payload(values["webhook_payload_template"], test_values)
         await agent_from_values(agent_id, values).send(
             "ABSulli test notification",
             f"{AGENT_FIELD_CONFIGS[agent_id]['label']} notifications are configured correctly.",
-            {"event_type": "test"},
+            extra,
         )
     except Exception as exc:
         log.warning("%s test notification failed: %s", AGENT_FIELD_CONFIGS[agent_id]["label"], clean_notification_error(exc))

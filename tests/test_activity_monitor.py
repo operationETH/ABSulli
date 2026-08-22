@@ -10,20 +10,24 @@ from absulli.monitors.activity import ActivityMonitor
 
 
 class FakeClient:
-    def __init__(self, payload):
+    def __init__(self, payload, items=None):
         self.payload = payload
+        self.items = items or {}
         self.calls = 0
 
     async def get_online_users(self):
         self.calls += 1
         return self.payload
 
+    async def get_item(self, item_id, expanded=False):
+        return self.items.get(item_id, {})
+
 
 class FakeNotifier:
     def __init__(self):
         self.events = []
 
-    async def notify(self, db, event_type, title, body, library_id=""):
+    async def notify(self, db, event_type, title, body, library_id="", context=None):
         event = {"event_type": event_type, "title": title, "body": body}
         if library_id:
             event["library_id"] = library_id
@@ -356,4 +360,123 @@ def test_poll_batches_existing_session_lookup_and_filters_stale_query():
             "body": "Stopped Book",
         }
     ]
+    db.close()
+
+
+def test_playback_notification_context_uses_full_item_metadata():
+    db = make_db()
+    db.add_all([
+        AbsUser(abs_user_id="user-1", username="raw-username", display_name="admin"),
+        Library(abs_library_id="lib-1", name="Audiobooks", media_type="book"),
+        MediaItem(abs_item_id="item-1", library_id="lib-1", library_name="Audiobooks", media_type="book", title="The Spy and the Traitor", author="Ben Macintyre"),
+    ])
+    db.commit()
+
+    class ContextNotifier(FakeNotifier):
+        async def notify(self, db, event_type, title, body, library_id="", context=None):
+            self.events.append({"event_type": event_type, "context": context or {}})
+
+    item = {
+        "id": "item-1",
+        "libraryId": "lib-1",
+        "mediaType": "book",
+        "media": {
+            "metadata": {
+                "title": "The Spy and the Traitor",
+                "subtitle": "The Greatest Espionage Story of the Cold War",
+                "authors": ["Ben Macintyre"],
+                "narrators": ["John Lee"],
+                "publishedYear": "2018",
+                "publisher": "Random House Audio",
+                "description": "<p>A <b>spy</b> story.</p>",
+                "isbn": None,
+                "asin": "B07DHRP7VK",
+                "language": "English",
+                "series": [],
+            }
+        },
+    }
+    notifier = ContextNotifier()
+    monitor = ActivityMonitor(FakeClient(online_payload(online_session()), items={"item-1": item}), notifier)
+
+    asyncio.run(monitor.poll(db))
+
+    context = notifier.events[0]["context"]
+    assert context["subtitle"] == "The Greatest Espionage Story of the Cold War"
+    assert context["author"] == "Ben Macintyre"
+    assert context["narrator"] == "John Lee"
+    assert context["publisher"] == "Random House Audio"
+    assert context["year"] == "2018"
+    assert context["asin"] == "B07DHRP7VK"
+    assert context["language"] == "English"
+    assert context["description"] == "A spy story."
+    db.close()
+
+
+def test_podcast_playback_notification_context_uses_episode_metadata():
+    db = make_db()
+    db.add_all([
+        AbsUser(abs_user_id="user-1", username="raw-username", display_name="admin"),
+        Library(abs_library_id="lib-podcast", name="podcasts test", media_type="podcast"),
+        MediaItem(
+            abs_item_id="podcast-1",
+            library_id="lib-podcast",
+            library_name="podcasts test",
+            media_type="podcast",
+            title="Crime Junkie",
+            author="Audiochuck",
+        ),
+    ])
+    db.commit()
+
+    class ContextNotifier(FakeNotifier):
+        async def notify(self, db, event_type, title, body, library_id="", context=None):
+            self.events.append({"event_type": event_type, "context": context or {}})
+
+    item = {
+        "id": "podcast-1",
+        "libraryId": "lib-podcast",
+        "mediaType": "podcast",
+        "media": {
+            "metadata": {
+                "title": "Crime Junkie",
+                "description": "Show description",
+                "itunesId": "1322200189",
+                "language": "en",
+            },
+            "episodes": [
+                {
+                    "id": "episode-2",
+                    "title": "MURDERED: Joyce LePage Part 2",
+                    "description": "Episode description",
+                }
+            ],
+        },
+    }
+    notifier = ContextNotifier()
+    monitor = ActivityMonitor(
+        FakeClient(
+            online_payload(
+                online_session(
+                    libraryItemId="podcast-1",
+                    displayTitle="MURDERED: Joyce LePage Part 2",
+                    mediaType="podcast",
+                )
+            ),
+            items={"podcast-1": item},
+        ),
+        notifier,
+    )
+
+    asyncio.run(monitor.poll(db))
+
+    context = notifier.events[0]["context"]
+    assert context["title"] == "MURDERED: Joyce LePage Part 2"
+    assert context["podcast"] == "Crime Junkie"
+    assert context["episode"] == "MURDERED: Joyce LePage Part 2"
+    assert context["description"] == "Episode description"
+    assert context["podcast_description"] == "Show description"
+    assert context["episode_description"] == "Episode description"
+    assert context["itunes_id"] == "1322200189"
+    assert context["language"] == "English"
     db.close()
