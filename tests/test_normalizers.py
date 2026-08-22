@@ -3,6 +3,7 @@ from datetime import datetime
 from absulli.http.normalizers import (
     extract_author,
     normalize_history_payload,
+    normalize_item_notification_context,
     normalize_library_payload,
     normalize_media_item_payload,
     normalize_online_payload,
@@ -183,6 +184,17 @@ def test_normalize_online_payload_supports_nested_user_session_data():
     assert rows[0]["title"] == "Active Book"
     assert rows[0]["progress"] == 25
 
+def test_notification_language_codes_use_display_names():
+    context = normalize_item_notification_context(
+        {
+            "id": "podcast-1",
+            "mediaType": "podcast",
+            "media": {"metadata": {"title": "Crime Junkie", "language": "en"}},
+        }
+    )
+    assert context["language"] == "English"
+
+
 def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     rows = normalize_media_item_payload(
         {
@@ -196,6 +208,13 @@ def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
                             "authors": [{"id": "author-1", "name": "Vince Flynn"}],
                             "narratorName": "George Guidall",
                             "series": [{"name": "Mitch Rapp"}],
+                            "subtitle": "A Mitch Rapp Novel",
+                            "publisher": "Atria",
+                            "description": "<p>A <b>thriller</b>.<br /><br />Second paragraph.</p>",
+                            "isbn": "9780743453998",
+                            "asin": "B002V5D2J6",
+                            "language": "English",
+                            "itunesId": "1234567890",
                             "publishedYear": "2005",
                         },
                         "duration": 3600,
@@ -221,6 +240,13 @@ def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     assert row["author_id"] == "author-1"
     assert row["narrator"] == "George Guidall"
     assert row["series"] == "Mitch Rapp"
+    assert row["subtitle"] == "A Mitch Rapp Novel"
+    assert row["publisher"] == "Atria"
+    assert row["description"] == "A thriller.\n\nSecond paragraph."
+    assert row["isbn"] == "9780743453998"
+    assert row["asin"] == "B002V5D2J6"
+    assert row["language"] == "English"
+    assert row["itunes_id"] == "1234567890"
     assert row["year"] == "2005"
     assert row["duration"] == 3600
     assert row["size_bytes"] == 12345
@@ -261,3 +287,10 @@ def test_normalize_user_and_library_payloads_are_defensive():
             "display_order": 2,
         }
     ]
+
+
+def test_display_language_normalizes_regional_english_code():
+    from absulli.http.normalizers import display_language
+
+    assert display_language("en-us") == "English (US)"
+    assert display_language("en-gb") == "English (UK)"

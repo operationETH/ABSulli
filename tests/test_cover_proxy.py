@@ -302,3 +302,35 @@ def test_author_detail_uses_book_cover_as_author_image_fallback(monkeypatch):
         assert 'data-fallback-media-bg="/covers/items/book-1?width=1000"' in response.text
     finally:
         db.close()
+
+
+def test_notification_cover_requires_valid_token(monkeypatch):
+    client, db = make_client(monkeypatch)
+    try:
+        db.add(MediaItem(abs_item_id="item-1", title="Known Book"))
+        db.commit()
+        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token: False)
+
+        response = client.get("/notification-covers/items/item-1?token=invalid")
+
+        assert response.status_code == 404
+        assert FakeCoverClient.calls == []
+    finally:
+        db.close()
+
+
+def test_notification_cover_proxies_existing_item_with_valid_token(monkeypatch):
+    client, db = make_client(monkeypatch)
+    try:
+        db.add(MediaItem(abs_item_id="item-1", title="Known Book"))
+        db.commit()
+        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token: item_id == "item-1" and token == "valid")
+
+        response = client.get("/notification-covers/items/item-1?token=valid&width=640")
+        assert response.headers["cross-origin-resource-policy"] == "cross-origin"
+
+        assert response.status_code == 200
+        assert response.content == b"item-image"
+        assert FakeCoverClient.calls == [("item", {"item_id": "item-1", "width": 640, "height": None, "image_format": "webp"})]
+    finally:
+        db.close()

@@ -343,6 +343,21 @@ function initializeGeneralSettingsTest(root = document) {
 }
 
 function initializeNotificationAgentSettings(root = document) {
+  const advancedToggles = Array.from(root.querySelectorAll('[data-agent-advanced-toggle]'));
+  advancedToggles.forEach((button) => {
+    const form = button.closest('[data-agent-form]');
+    const content = form?.querySelector('[data-agent-advanced-content]');
+    const state = form?.querySelector('[data-agent-advanced-state]');
+    if (!form || !content || !state) return;
+
+    button.addEventListener('click', () => {
+      const open = content.hidden;
+      content.hidden = !open;
+      state.value = open ? 'true' : 'false';
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  });
+
   const libraryScopes = Array.from(root.querySelectorAll('[data-library-scope]'));
   libraryScopes.forEach((scope) => {
     const allLibraries = scope.querySelector('[data-all-libraries]');
@@ -716,7 +731,68 @@ document.addEventListener('submit', (event) => {
   }
 });
 
+let notificationTemplateTarget = null;
+
+document.addEventListener('focusin', (event) => {
+  if (event.target.matches('.notification-template-fields input, .notification-template-fields textarea, .webhook-payload-fields textarea')) {
+    notificationTemplateTarget = event.target;
+  }
+});
+
 document.addEventListener('click', async (event) => {
+  const templateVariable = event.target.closest('[data-template-variable]');
+  if (templateVariable) {
+    const form = templateVariable.closest('form');
+    let target = notificationTemplateTarget;
+    if (!target || !target.isConnected || target.form !== form) {
+      target = form?.querySelector('.notification-template[open] .webhook-payload-fields textarea, .notification-template[open] .notification-template-fields textarea, .notification-template[open] .notification-template-fields input');
+    }
+    if (target) {
+      const variable = templateVariable.dataset.templateVariable || '';
+      const start = target.selectionStart ?? target.value.length;
+      const end = target.selectionEnd ?? start;
+      target.setRangeText(variable, start, end, 'end');
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.focus();
+      notificationTemplateTarget = target;
+    }
+    return;
+  }
+
+  const addWebhookHeader = event.target.closest('[data-webhook-add-header]');
+  if (addWebhookHeader) {
+    const container = addWebhookHeader.closest('[data-webhook-custom-headers]');
+    const list = container?.querySelector('[data-webhook-header-list]');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'webhook-custom-header-row';
+    row.innerHTML = '<input name="webhook_custom_header_name" type="text" placeholder="Header Name" autocomplete="off"><input name="webhook_custom_header_value" type="text" placeholder="Header Value" autocomplete="off"><button type="button" class="secondary" data-webhook-remove-header>Remove</button>';
+    list.appendChild(row);
+    row.querySelector('input')?.focus();
+    return;
+  }
+
+  const removeWebhookHeader = event.target.closest('[data-webhook-remove-header]');
+  if (removeWebhookHeader) {
+    removeWebhookHeader.closest('.webhook-custom-header-row')?.remove();
+    return;
+  }
+
+  const resetWebhookPayload = event.target.closest('[data-webhook-reset-payload]');
+  if (resetWebhookPayload) {
+    const form = resetWebhookPayload.closest('form');
+    const editor = form?.querySelector('textarea[name="webhook_payload_template"]');
+    const source = form?.querySelector('[data-webhook-default-payload]');
+    if (!editor || !source) return;
+    try {
+      editor.value = JSON.parse(source.textContent || '""');
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (_error) {
+      return;
+    }
+    return;
+  }
+
   const absToggle = event.target.closest('[data-abs-api-key-toggle]');
   if (absToggle) {
     const input = document.getElementById('abs-api-key');

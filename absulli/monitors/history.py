@@ -11,6 +11,7 @@ from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.utils import friendly_names
 from absulli.notifiers.manager import event_enabled
 from absulli.http.normalizers import (
+    _plain_text,
     normalize_history_payload,
     normalize_library_payload,
     normalize_media_item_payload,
@@ -59,6 +60,22 @@ class HistoryMonitor:
                     "New book added",
                     body,
                     library_id=str(book.get("library_id") or ""),
+                    context={
+                        "item_id": book.get("abs_item_id") or "",
+                        "title": title,
+                        "author": author,
+                        "series": book.get("series") or "",
+                        "narrator": book.get("narrator") or "",
+                        "subtitle": book.get("subtitle") or "",
+                        "publisher": book.get("publisher") or "",
+                        "description": _plain_text(book.get("description") or ""),
+                        "isbn": book.get("isbn") or "",
+                        "asin": book.get("asin") or "",
+                        "language": book.get("language") or "",
+                        "year": book.get("year") or "",
+                        "library_name": library_name,
+                        "media_type": book.get("media_type") or "book",
+                    },
                 )
             except Exception as exc:
                 log.warning("New book notification failed for %s: %s", title, exc)
@@ -96,6 +113,18 @@ class HistoryMonitor:
                     "New podcast added",
                     body,
                     library_id=str(podcast.get("library_id") or ""),
+                    context={
+                        "item_id": podcast.get("abs_item_id") or "",
+                        "title": title,
+                        "podcast": title,
+                        "podcast_title": title,
+                        "author": author,
+                        "description": _plain_text(podcast.get("description") or ""),
+                        "podcast_description": _plain_text(podcast.get("description") or ""),
+                        "itunes_id": podcast.get("itunes_id") or "",
+                        "library_name": library_name,
+                        "media_type": podcast.get("media_type") or "podcast",
+                    },
                 )
             except Exception as exc:
                 log.warning("New podcast notification failed for %s: %s", title, exc)
@@ -152,6 +181,16 @@ class HistoryMonitor:
                     "New podcast episode added",
                     body,
                     library_id=str(episode.get("library_id") or ""),
+                    context={
+                        "item_id": episode.get("podcast_id") or "",
+                        "podcast_title": podcast_title,
+                        "episode_title": episode_title,
+                        "episode_description": episode.get("episode_description") or "",
+                        "podcast_description": episode.get("podcast_description") or "",
+                        "itunes_id": episode.get("itunes_id") or "",
+                        "library_name": library_name,
+                        "media_type": "podcast",
+                    },
                 )
             except Exception as exc:
                 log.warning("New podcast episode notification failed for %s: %s", episode_title, exc)
@@ -189,8 +228,12 @@ class HistoryMonitor:
                         {
                             "podcast_title": podcast_title,
                             "episode_title": str(episode.get("title") or "Unknown episode"),
+                            "episode_description": _plain_text(episode.get("description") or episode.get("subtitle") or ""),
+                            "podcast_description": _plain_text(metadata.get("description") or ""),
+                            "itunes_id": str(metadata.get("itunesId") or metadata.get("itunesID") or metadata.get("itunes_id") or ""),
                             "library_name": library.name,
                             "library_id": library.abs_library_id,
+                            "podcast_id": podcast_id,
                         }
                     )
 
@@ -464,17 +507,19 @@ class HistoryMonitor:
                 library.item_count = max(total, 0)
                 library.updated_at = now
 
+            media_item_fields = {column.name for column in MediaItem.__table__.columns} - {"id", "created_at", "updated_at"}
             for item in items:
                 item_id = item.get("abs_item_id")
                 if not item_id:
                     continue
+                stored_item = {key: value for key, value in item.items() if key in media_item_fields}
                 existing = existing_map.get(item_id)
                 if existing:
-                    for key, value in item.items():
+                    for key, value in stored_item.items():
                         setattr(existing, key, value)
                     existing.updated_at = now
                 else:
-                    existing = MediaItem(**item, updated_at=now)
+                    existing = MediaItem(**stored_item, updated_at=now)
                     db.add(existing)
                     existing_map[item_id] = existing
                     imported += 1

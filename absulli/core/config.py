@@ -76,6 +76,7 @@ class Settings(BaseSettings):
 
     cookie_secure: bool = Field(default=False, alias="ABSULLI_COOKIE_SECURE")
     trust_proxy: bool = Field(default=False, alias="ABSULLI_TRUST_PROXY")
+    public_url: str = Field(default="", alias="ABSULLI_PUBLIC_URL")
 
     auth_login_max_attempts: int = Field(default=8, alias="ABSULLI_AUTH_LOGIN_MAX_ATTEMPTS")
     auth_login_window_seconds: int = Field(default=900, alias="ABSULLI_AUTH_LOGIN_WINDOW_SECONDS")
