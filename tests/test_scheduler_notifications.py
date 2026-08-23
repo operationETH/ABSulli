@@ -58,3 +58,18 @@ def test_initial_reachability_state_does_not_send_notification(monkeypatch):
 
     assert scheduler.notifier.calls == []
     assert store["abs_reachable"] == "false"
+
+
+def test_refresh_update_status_runs_in_thread(monkeypatch):
+    calls = []
+    scheduler = object.__new__(AbsulliScheduler)
+    scheduler.settings = object()
+
+    async def fake_to_thread(function, *args):
+        calls.append((function, args))
+
+    monkeypatch.setattr(scheduler_module.asyncio, "to_thread", fake_to_thread)
+
+    asyncio.run(scheduler.refresh_update_status())
+
+    assert calls == [(scheduler_module.refresh_update_status, (scheduler.settings, scheduler_module.__version__))]

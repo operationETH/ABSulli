@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from absulli import __version__
 from absulli.core.config import Settings
 from absulli.core.setup_state import get_setup_setting, is_setup_complete, set_setup_setting
 from absulli.core.time import utcnow, utcnow_iso
@@ -13,6 +14,7 @@ from absulli.http.abs_client import AudiobookshelfClient
 from absulli.monitors.activity import ActivityMonitor
 from absulli.monitors.history import HistoryMonitor
 from absulli.notifiers.manager import NotificationManager
+from absulli.web.update_check import CACHE_TTL_SECONDS, refresh_update_status
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +75,9 @@ class AbsulliScheduler:
         finally:
             db.close()
 
+    async def refresh_update_status(self) -> None:
+        await asyncio.to_thread(refresh_update_status, self.settings, __version__)
+
     async def poll_activity(self) -> None:
         if not self._ready_to_poll():
             log.debug("Skipping activity poll until first-run setup is complete")
@@ -130,9 +135,18 @@ class AbsulliScheduler:
             replace_existing=True,
             max_instances=1,
         )
+        self.scheduler.add_job(
+            self.refresh_update_status,
+            "interval",
+            seconds=CACHE_TTL_SECONDS,
+            id="refresh_update_status",
+            replace_existing=True,
+            max_instances=1,
+        )
         self.scheduler.start()
         asyncio.create_task(self.poll_activity())
         asyncio.create_task(self.poll_history())
+        asyncio.create_task(self.refresh_update_status())
         log.info("ABSulli scheduler started")
 
     async def shutdown(self) -> None:

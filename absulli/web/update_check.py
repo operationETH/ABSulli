@@ -22,6 +22,8 @@ _memory_release_expires_at = 0.0
 _memory_nightly: dict[str, object] | None = None
 _memory_nightly_expires_at = 0.0
 _memory_comparisons: dict[tuple[str, str], tuple[str, float]] = {}
+_status_lock = threading.Lock()
+_memory_statuses: dict[str, dict[str, object]] = {}
 
 
 def _stable_version(value: str) -> tuple[int, int, int] | None:
@@ -223,10 +225,10 @@ def _latest_nightly(data_dir: Path) -> dict[str, object]:
         return dict(value)
 
 
-def update_status(settings, current_version: str) -> dict[str, object]:
+def _default_update_status(current_version: str) -> dict[str, object]:
     channel = _channel(current_version)
     current_display = _display_version(current_version, channel)
-    status = {
+    return {
         "channel": channel,
         "current_version": current_display,
         "latest_version": "",
@@ -237,8 +239,24 @@ def update_status(settings, current_version: str) -> dict[str, object]:
         "release_url": RELEASES_URL,
     }
 
+
+def update_status(settings, current_version: str) -> dict[str, object]:
+    with _status_lock:
+        status = _memory_statuses.get(current_version)
+        if status is not None:
+            return dict(status)
+    return _default_update_status(current_version)
+
+
+def refresh_update_status(settings, current_version: str) -> dict[str, object]:
+    status = _default_update_status(current_version)
+    channel = str(status["channel"])
+    current_display = str(status["current_version"])
+
     if channel == "development":
-        return status
+        with _status_lock:
+            _memory_statuses[current_version] = dict(status)
+        return dict(status)
 
     if channel == "nightly":
         nightly = _latest_nightly(settings.data_dir)
@@ -259,7 +277,9 @@ def update_status(settings, current_version: str) -> dict[str, object]:
             else:
                 status["latest_version"] = current_display
                 status["release_url"] = NIGHTLY_COMMITS_URL
-        return status
+        with _status_lock:
+            _memory_statuses[current_version] = dict(status)
+        return dict(status)
 
     release = _latest_release(settings.data_dir)
     status["release_url"] = str(release.get("url") or RELEASES_URL)
@@ -277,7 +297,9 @@ def update_status(settings, current_version: str) -> dict[str, object]:
     else:
         status["badge_label"] = "Up to Date"
         status["badge_class"] = "current"
-    return status
+    with _status_lock:
+        _memory_statuses[current_version] = dict(status)
+    return dict(status)
 
 
 def reset_update_cache() -> None:
@@ -288,3 +310,5 @@ def reset_update_cache() -> None:
         _memory_nightly = None
         _memory_nightly_expires_at = 0.0
         _memory_comparisons.clear()
+    with _status_lock:
+        _memory_statuses.clear()
