@@ -79,9 +79,7 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert 'data-metrics-token-regenerate' in response.text
     assert "HSTS Header" in response.text
     assert "CORS Allowed Origins" in response.text
-    assert "Restart Required" in response.text
-    assert "Methods, headers, and credentials use defaults" in response.text
-    assert "Advanced CORS options can be changed in a .env file" in response.text
+    assert "Changes apply immediately." in response.text
     assert "Content Security Policy" not in response.text
     assert "HSTS Max Age Seconds" not in response.text
     assert "CORS Allowed Methods" not in response.text

@@ -1,11 +1,11 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from absulli import __version__
 from absulli.core.config import get_settings
+from absulli.core.cors import DynamicCORSMiddleware
 from absulli.core.logging import configure_logging
 from absulli.core.cover_cache import prune_cover_cache
 from absulli.database.session import init_db
@@ -32,14 +32,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
 
-if settings.cors_allowed_origins_list:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_allowed_origins_list,
-        allow_credentials=settings.cors_allow_credentials,
-        allow_methods=settings.cors_allowed_methods_list,
-        allow_headers=settings.cors_allowed_headers_list,
-    )
+app.add_middleware(DynamicCORSMiddleware)
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.mount("/static", StaticFiles(directory="absulli/web/static"), name="static")

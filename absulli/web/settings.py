@@ -303,7 +303,6 @@ NETWORK_FIELD_CONFIGS = [
         "type": "checkbox",
         "default": False,
         "restart_required": True,
-        "advanced_note": "Advanced HSTS options can be changed in a .env file.",
     },
     {
         "name": "metrics_token",
@@ -315,11 +314,9 @@ NETWORK_FIELD_CONFIGS = [
     {
         "name": "cors_allowed_origins",
         "label": "CORS Allowed Origins",
-        "description": "Allow browser requests from specific external origins. Leave blank to disable CORS.",
+        "description": "Allow browser requests from specific external origins. Leave blank to disable CORS. Changes apply immediately.",
         "type": "text",
         "placeholder": "https://absulli.example.com, https://example.com",
-        "restart_required": True,
-        "advanced_note": "Methods, headers, and credentials use defaults. Advanced CORS options can be changed in a .env file.",
     },
 ]
 
