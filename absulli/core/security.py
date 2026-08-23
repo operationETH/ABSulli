@@ -188,12 +188,10 @@ class SecurityHeadersMiddleware:
                 media_type="text/plain",
             )
 
-        if path == "/metrics" and _valid_metrics_token(request):
-            request.state.absulli_authenticated = True
-            request.state.absulli_auth_method = "metrics_token"
+        if path == "/metrics" and settings.effective_metrics_token:
             return None
 
-        if path != "/metrics" and _valid_api_token(request):
+        if _valid_api_token(request):
             request.state.absulli_authenticated = True
             request.state.absulli_auth_method = "api_token"
             return None
@@ -298,18 +296,6 @@ def _valid_api_token(request: Request) -> bool:
         provided = _extract_bearer_token(request.headers.get("Authorization"))
     if not provided:
         provided = request.headers.get("X-Absulli-Api-Token", "").strip()
-    return bool(provided and secrets.compare_digest(provided, expected))
-
-
-def _valid_metrics_token(request: Request) -> bool:
-    settings = get_settings()
-    expected = settings.effective_metrics_token
-    if not expected:
-        return False
-
-    provided = _extract_bearer_token(request.headers.get("Authorization"))
-    if not provided:
-        provided = request.headers.get("X-Absulli-Metrics-Token", "").strip()
     return bool(provided and secrets.compare_digest(provided, expected))
 
 

@@ -104,7 +104,8 @@ def test_api_and_metrics_tokens_still_work(monkeypatch):
         return {"ok": True}
 
     @app.get("/metrics")
-    def metrics():
+    def metrics(request: Request):
+        security.verify_metrics_access(request)
         return Response("metric 1\n", media_type="text/plain")
 
     client = TestClient(app)
@@ -131,6 +132,32 @@ def test_api_and_metrics_tokens_still_work(monkeypatch):
     get_settings.cache_clear()
 
 
+
+
+def test_metrics_without_metrics_token_requires_normal_auth(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
+    monkeypatch.delenv("ABSULLI_METRICS_TOKEN", raising=False)
+    monkeypatch.delenv("ABSULLI_API_KEY", raising=False)
+    monkeypatch.setenv("ABSULLI_API_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(security, "setup_required", lambda: False)
+
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.get("/metrics")
+    def metrics(request: Request):
+        security.verify_metrics_access(request)
+        return Response("metric 1\n", media_type="text/plain")
+
+    client = TestClient(app)
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 401
+    assert response.text == "authentication required"
+
+    get_settings.cache_clear()
 
 
 def test_verify_metrics_access_rejects_empty_provided_token(monkeypatch):
