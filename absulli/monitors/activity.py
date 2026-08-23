@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
+from absulli.core.config import get_settings
 from absulli.database.models import ActivitySession, Library, MediaItem
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.http.normalizers import normalize_item_notification_context, normalize_online_payload, normalize_podcast_playback_context, utcnow
@@ -122,7 +123,8 @@ class ActivityMonitor:
                     context=await self._notification_context(session),
                 )
 
-        stale_cutoff = now - timedelta(seconds=45)
+        stale_seconds = max(45, get_settings().effective_abs_poll_interval * 3)
+        stale_cutoff = now - timedelta(seconds=stale_seconds)
         stale_query = db.query(ActivitySession).filter(
             ActivitySession.is_active.is_(True),
             ActivitySession.last_seen_at < stale_cutoff,

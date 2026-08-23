@@ -265,6 +265,57 @@ def test_poll_keeps_recent_missing_sessions_active_until_stale_cutoff():
     db.close()
 
 
+def test_poll_stale_cutoff_scales_with_poll_interval(monkeypatch):
+    db = make_db()
+    db.add_all(
+        [
+            ActivitySession(
+                session_key="within-scaled-cutoff",
+                abs_user_id="user-1",
+                username="Kenny",
+                abs_item_id="item-1",
+                title="Still Active",
+                is_active=True,
+                last_seen_at=utcnow() - timedelta(seconds=90),
+            ),
+            ActivitySession(
+                session_key="past-scaled-cutoff",
+                abs_user_id="user-1",
+                username="Kenny",
+                abs_item_id="item-2",
+                title="Stopped",
+                is_active=True,
+                last_seen_at=utcnow() - timedelta(seconds=190),
+            ),
+        ]
+    )
+    db.commit()
+
+    class FakeSettings:
+        effective_abs_poll_interval = 60
+
+    monkeypatch.setattr("absulli.monitors.activity.get_settings", lambda: FakeSettings())
+
+    notifier = FakeNotifier()
+    monitor = ActivityMonitor(FakeClient(online_payload()), notifier)
+
+    count = asyncio.run(monitor.poll(db))
+
+    within = db.query(ActivitySession).filter_by(session_key="within-scaled-cutoff").one()
+    past = db.query(ActivitySession).filter_by(session_key="past-scaled-cutoff").one()
+    assert count == 0
+    assert within.is_active is True
+    assert past.is_active is False
+    assert notifier.events == [
+        {
+            "event_type": "playback_stop",
+            "title": "Kenny stopped listening",
+            "body": "Stopped",
+        }
+    ]
+    db.close()
+
+
 def test_poll_batches_existing_session_lookup_and_filters_stale_query():
     from sqlalchemy import event
 
