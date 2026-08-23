@@ -364,13 +364,17 @@ async def setup_test_connection(request: Request):
 
 
 async def run_initial_setup_import() -> None:
+    scheduler = None
     try:
         scheduler = AbsulliScheduler(get_settings())
         await scheduler.poll_history()
         await scheduler.poll_activity()
         log.info("Initial setup import completed")
-    except Exception as exc:  
+    except Exception as exc:
         log.warning("Initial setup import failed: %s", exc)
+    finally:
+        if scheduler is not None:
+            await scheduler.client.aclose()
 
 
 @router.post("/setup", response_class=HTMLResponse)
