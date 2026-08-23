@@ -382,7 +382,18 @@ class Settings(BaseSettings):
 
     @property
     def effective_cors_allowed_origins(self) -> str:
-        return self.effective_setting("cors_allowed_origins") if not self.field_configured("cors_allowed_origins") else self.cors_allowed_origins
+        if self.field_configured("cors_allowed_origins"):
+            return self.cors_allowed_origins
+
+        try:
+            from absulli.core.setup_state import get_setup_setting_if_available
+
+            stored_value = get_setup_setting_if_available("cors_allowed_origins")
+        except Exception as exc:
+            log.debug("Unable to read stored setting cors_allowed_origins: %s", exc)
+            stored_value = ""
+
+        return str(stored_value or "").strip()
 
     @property
     def effective_cors_allow_credentials(self) -> bool:

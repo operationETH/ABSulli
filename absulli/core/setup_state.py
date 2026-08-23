@@ -4,6 +4,8 @@ import secrets
 import threading
 import time
 
+from sqlalchemy import inspect
+
 from absulli.core.time import utcnow
 from absulli.database.models import Setting
 from absulli.database.session import SessionLocal, engine
@@ -73,6 +75,22 @@ def ensure_api_token() -> str:
     token = secrets.token_urlsafe(32)
     set_setup_setting("api_token", token)
     return token
+
+
+def get_setup_setting_if_available(key: str, default: str = "") -> str:
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    if "settings" not in set(inspect(engine).get_table_names()):
+        return default
+
+    with SessionLocal() as db:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        value = row.value if row and row.value is not None else default
+
+    _cache_set(key, value)
+    return value
 
 
 def get_setup_setting(key: str, default: str = "") -> str:

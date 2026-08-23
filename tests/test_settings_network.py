@@ -41,6 +41,7 @@ def make_client(monkeypatch, store=None):
     monkeypatch.setattr(web_routes, "set_setup_setting", fake_set)
     monkeypatch.setattr(web_routes, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(setup_state, "get_setup_setting", fake_get)
+    monkeypatch.setattr(setup_state, "get_setup_setting_if_available", fake_get)
     monkeypatch.setattr(setup_state, "set_setup_setting", fake_set)
     monkeypatch.setattr(setup_state, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
