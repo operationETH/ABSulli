@@ -36,7 +36,7 @@ def make_client(monkeypatch, store=None):
     return TestClient(app), store
 
 
-def test_api_tab_generates_and_renders_key(monkeypatch):
+def test_api_tab_does_not_generate_key_while_disabled(monkeypatch):
     client, store = make_client(monkeypatch)
 
     response = client.get("/settings?tab=api")
@@ -45,8 +45,23 @@ def test_api_tab_generates_and_renders_key(monkeypatch):
     assert response.headers["cache-control"] == "no-store"
     assert "API Access" in response.text
     assert 'name="api_enabled"' in response.text
-    assert 'id="absulli-api-key"' in response.text
-    assert store["api_token"]
+    assert 'id="absulli-api-key"' not in response.text
+    assert "Enable the API and save to generate a key." in response.text
+    assert "api_token" not in store
+
+
+def test_api_enable_generates_key_when_missing(monkeypatch):
+    client, store = make_client(monkeypatch)
+
+    response = client.post(
+        "/settings/api",
+        data={"csrf_token": "valid-token", "api_enabled": "on"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert store["api_enabled"] == "true"
+    assert len(store["api_token"]) >= 32
 
 
 def test_api_settings_enable_and_disable(monkeypatch):

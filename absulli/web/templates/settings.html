@@ -244,6 +244,7 @@
           {% if api_settings.token_from_env %}<div class="settings-row-badges"><em>Managed by .env</em></div>{% endif %}
         </div>
         <div class="settings-row-control api-key-control">
+          {% if api_settings.token %}
           <div class="api-key-input-group">
             <input id="absulli-api-key" type="text" value="{{ '•' * 48 }}" data-api-key-value="{{ api_settings.token }}" data-api-key-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="ABSulli API key">
             <button type="button" class="secondary api-key-icon-button" data-api-key-toggle aria-label="Show API key" title="Show API key">
@@ -260,6 +261,9 @@
             {% endif %}
           </div>
           <small id="api-key-copy-status" hidden>Copied.</small>
+          {% else %}
+          <small>Enable the API and save to generate a key.</small>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -269,7 +273,7 @@
     </div>
   </form>
 
-  {% if not api_settings.token_from_env %}
+  {% if api_settings.token and not api_settings.token_from_env %}
   <form id="api-regenerate-form" method="post" action="/settings/api/regenerate">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>

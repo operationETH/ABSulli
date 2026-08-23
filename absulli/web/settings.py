@@ -758,7 +758,7 @@ def user_values_from_form(settings, form) -> tuple[dict[str, str], bool]:
 
 
 def api_settings_context(settings) -> dict[str, object]:
-    token = settings.effective_api_token or setup_state.ensure_api_token()
+    token = settings.effective_api_token
     return {
         "enabled": settings.effective_api_enabled,
         "enabled_from_env": settings.api_enabled_from_env,
@@ -770,9 +770,10 @@ def api_settings_context(settings) -> dict[str, object]:
 
 def api_values_from_form(settings, form) -> dict[str, str]:
     values: dict[str, str] = {}
+    enabled = settings.effective_api_enabled if settings.api_enabled_from_env else form.get("api_enabled") == "on"
     if not settings.api_enabled_from_env:
-        values["api_enabled"] = "true" if form.get("api_enabled") == "on" else "false"
-    if not settings.api_token_from_env:
+        values["api_enabled"] = "true" if enabled else "false"
+    if enabled and not settings.api_token_from_env and not settings.effective_api_token:
         values["api_token"] = setup_state.ensure_api_token()
     return values
 

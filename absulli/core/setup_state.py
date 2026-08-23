@@ -65,7 +65,6 @@ def warm_setup_state_cache() -> None:
     _ensure_settings_table()
     for key in (SETUP_COMPLETE_SETTING, "auth_username", "auth_password_hash", "api_enabled", "api_token"):
         get_setup_setting(key)
-    ensure_api_token()
 
 
 def ensure_api_token() -> str:
