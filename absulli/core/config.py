@@ -407,14 +407,10 @@ class Settings(BaseSettings):
 
     @property
     def effective_cors_allowed_methods(self) -> str:
-        if self.field_configured("cors_allowed_methods"):
-            return self.cors_allowed_methods
         return self.cors_allowed_methods
 
     @property
     def effective_cors_allowed_headers(self) -> str:
-        if self.field_configured("cors_allowed_headers"):
-            return self.cors_allowed_headers
         return self.cors_allowed_headers
 
     @property

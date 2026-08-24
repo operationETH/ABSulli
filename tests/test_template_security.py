@@ -18,3 +18,11 @@ def test_history_page_size_select_uses_auto_submit():
     partial = (TEMPLATES_DIR / "partials" / "history_page_size.html").read_text()
     assert "data-auto-submit" in partial
     assert "onchange" not in partial
+
+
+def test_settings_json_data_block_has_csp_nonce():
+    template = (TEMPLATES_DIR / "settings.html").read_text()
+    assert (
+        '<script type="application/json" nonce="{{ request.state.absulli_csp_nonce | default(\'\') }}" '
+        "data-webhook-default-payload>"
+    ) in template

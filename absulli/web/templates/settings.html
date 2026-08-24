@@ -467,7 +467,7 @@
         <div class="webhook-payload-actions">
           <button type="button" class="secondary" data-webhook-reset-payload>Reset to Default</button>
         </div>
-        <script type="application/json" data-webhook-default-payload>{{ agent.webhook_default_payload|tojson }}</script>
+        <script type="application/json" nonce="{{ request.state.absulli_csp_nonce | default('') }}" data-webhook-default-payload>{{ agent.webhook_default_payload|tojson }}</script>
       </div>
       {% endif %}
       </div>
