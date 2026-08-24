@@ -351,6 +351,7 @@ class NotificationManager:
                     username=self.settings.effective_setting("email_smtp_username"),
                     password=self.settings.effective_setting("email_smtp_password"),
                     use_tls=self.settings.effective_bool_setting("email_use_tls", default=True),
+                    use_starttls=self.settings.effective_bool_setting("email_use_starttls", default=False),
                 ))
             )
 

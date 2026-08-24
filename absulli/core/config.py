@@ -113,6 +113,7 @@ class Settings(BaseSettings):
     email_from: str = Field(default="", alias="EMAIL_FROM")
     email_to: str = Field(default="", alias="EMAIL_TO")
     email_use_tls: bool = Field(default=True, alias="EMAIL_USE_TLS")
+    email_use_starttls: bool = Field(default=False, alias="EMAIL_USE_STARTTLS")
     webhook_url: str = Field(default="", alias="WEBHOOK_URL")
 
     @model_validator(mode="after")

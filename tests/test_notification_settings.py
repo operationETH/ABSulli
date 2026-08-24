@@ -250,6 +250,37 @@ def test_settings_page_shows_all_notification_agent_tabs(monkeypatch):
     assert "Coming soon" not in response.text
 
 
+def test_email_settings_show_starttls_option(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications&agent=email")
+
+    assert response.status_code == 200
+    assert 'name="email_use_starttls"' in response.text
+    assert "Upgrade the connection to TLS, normally on port 587." in response.text
+
+
+def test_email_settings_reject_multiple_tls_modes(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.post(
+        "/settings/notifications/email/test",
+        data={
+            "enabled": "on",
+            "email_smtp_host": "smtp.example.com",
+            "email_smtp_port": "587",
+            "email_from": "absulli@example.com",
+            "email_to": "user@example.com",
+            "email_use_tls": "on",
+            "email_use_starttls": "on",
+            "csrf_token": "valid-token",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"ok": False, "message": "Choose either SSL/TLS or STARTTLS, not both"}
+
+
 def test_notification_agent_tabs_render_service_icons(monkeypatch):
     client, _store = make_client(monkeypatch)
 
@@ -1471,4 +1502,3 @@ def test_webhook_single_payload_renders_context_for_every_event(monkeypatch):
         "author": "Author",
         "description": "Line one\nLine two",
     }
-

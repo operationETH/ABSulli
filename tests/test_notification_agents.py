@@ -43,6 +43,7 @@ def clear_env(monkeypatch):
         "EMAIL_FROM",
         "EMAIL_TO",
         "EMAIL_USE_TLS",
+        "EMAIL_USE_STARTTLS",
     ):
         monkeypatch.delenv(key, raising=False)
     get_settings.cache_clear()
@@ -553,6 +554,70 @@ def test_email_agent_can_send_without_ssl_tls(monkeypatch):
     assert calls == [("connect_plain", "smtp.example.com", 25, 10), ("send_message", "Title")]
 
 
+def test_email_agent_uses_starttls_before_login(monkeypatch):
+    calls = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            calls.append(("connect", host, port, timeout))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def starttls(self, context):
+            calls.append(("starttls", type(context).__name__))
+
+        def login(self, username, password):
+            calls.append(("login", username, password))
+
+        def send_message(self, email):
+            calls.append(("send_message", email["Subject"]))
+
+    class UnexpectedSMTPSSL:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("SMTP_SSL should not be used with STARTTLS")
+
+    import smtplib
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", UnexpectedSMTPSSL)
+
+    agent = EmailAgent(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        sender="absulli@example.com",
+        recipient="user@example.com",
+        username="smtp-user",
+        password="smtp-pass",
+        use_tls=False,
+        use_starttls=True,
+    )
+
+    asyncio.run(agent.send("Title", "Body"))
+
+    assert calls == [
+        ("connect", "smtp.example.com", 587, 10),
+        ("starttls", "SSLContext"),
+        ("login", "smtp-user", "smtp-pass"),
+        ("send_message", "Title"),
+    ]
+
+
+def test_email_agent_rejects_multiple_tls_modes():
+    with pytest.raises(ValueError, match="cannot both be enabled"):
+        EmailAgent(
+            smtp_host="smtp.example.com",
+            smtp_port=465,
+            sender="absulli@example.com",
+            recipient="user@example.com",
+            use_tls=True,
+            use_starttls=True,
+        )
+
+
 def test_notification_manager_builds_saved_email_agent(monkeypatch):
     values = {
         "email_smtp_host": "smtp.example.com",
@@ -562,6 +627,7 @@ def test_notification_manager_builds_saved_email_agent(monkeypatch):
         "email_from": "absulli@example.com",
         "email_to": "user@example.com",
         "email_use_tls": "true",
+        "email_use_starttls": "false",
     }
     monkeypatch.setattr(setup_state, "get_setup_setting", lambda key, default="": values.get(key, default))
 
@@ -576,6 +642,7 @@ def test_notification_manager_builds_saved_email_agent(monkeypatch):
     assert agents[0].username == "smtp-user"
     assert agents[0].password == "smtp-pass"
     assert agents[0].use_tls is True
+    assert agents[0].use_starttls is False
 
 
 def test_discord_agent_truncates_embed_title_and_description(monkeypatch):

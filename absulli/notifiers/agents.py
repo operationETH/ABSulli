@@ -5,6 +5,7 @@ from email.message import EmailMessage
 import json
 import re
 import smtplib
+import ssl
 from typing import Any
 
 import httpx
@@ -198,7 +199,10 @@ class EmailAgent:
         username: str = "",
         password: str = "",
         use_tls: bool = True,
+        use_starttls: bool = False,
     ):
+        if use_tls and use_starttls:
+            raise ValueError("SSL/TLS and STARTTLS cannot both be enabled")
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.sender = sender
@@ -206,6 +210,7 @@ class EmailAgent:
         self.username = username
         self.password = password
         self.use_tls = use_tls
+        self.use_starttls = use_starttls
 
     async def send(self, title: str, message: str, extra: dict[str, Any] | None = None) -> None:
         await asyncio.to_thread(self._send_sync, title, message)
@@ -219,6 +224,8 @@ class EmailAgent:
 
         smtp_class = smtplib.SMTP_SSL if self.use_tls else smtplib.SMTP
         with smtp_class(self.smtp_host, self.smtp_port, timeout=10) as smtp:
+            if self.use_starttls:
+                smtp.starttls(context=ssl.create_default_context())
             if self.username or self.password:
                 smtp.login(self.username, self.password)
             smtp.send_message(email)

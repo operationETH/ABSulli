@@ -339,7 +339,8 @@ AGENT_FIELD_CONFIGS = {
             {"name": "email_to", "label": "To Address", "type": "email", "required": True, "placeholder": "you@example.com"},
             {"name": "email_smtp_username", "label": "SMTP Username", "type": "text", "required": False, "placeholder": "optional"},
             {"name": "email_smtp_password", "label": "SMTP Password", "type": "password", "required": False, "placeholder": "optional"},
-            {"name": "email_use_tls", "label": "Use SSL/TLS", "type": "checkbox", "required": False, "default": True},
+            {"name": "email_use_tls", "label": "Use SSL/TLS", "type": "checkbox", "required": False, "default": True, "helper": "Use implicit TLS, normally on port 465."},
+            {"name": "email_use_starttls", "label": "Use STARTTLS", "type": "checkbox", "required": False, "default": False, "helper": "Upgrade the connection to TLS, normally on port 587."},
         ],
     },
     "discord": {
@@ -917,6 +918,8 @@ def clean_agent_url_fields(agent_id: str, values: dict[str, str]) -> dict[str, s
         if port < 1 or port > 65535:
             raise ValueError("SMTP port must be between 1 and 65535")
         cleaned["email_smtp_port"] = str(port)
+    if agent_id == "email" and cleaned.get("email_use_tls") == "true" and cleaned.get("email_use_starttls") == "true":
+        raise ValueError("Choose either SSL/TLS or STARTTLS, not both")
     return cleaned
 
 
@@ -974,6 +977,6 @@ def agent_from_values(agent_id: str, values: dict[str, str]):
             username=values.get("email_smtp_username", ""),
             password=values.get("email_smtp_password", ""),
             use_tls=values.get("email_use_tls", "true").lower() in {"1", "true", "yes", "on"},
+            use_starttls=values.get("email_use_starttls", "false").lower() in {"1", "true", "yes", "on"},
         )
     raise ValueError("Unknown notification agent")
-
