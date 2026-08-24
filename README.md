@@ -119,6 +119,8 @@ ABSulli stores all data locally in `/config`:
 
 By default, no data is sent anywhere outside your network. ABSulli communicates with your Audiobookshelf instance, and only sends outbound notification requests if you configure notification agents.
 
+The `/config` directory and its backups contain listening data and sensitive credentials, including Audiobookshelf and notification tokens. Keep the directory and all backups private. Do not upload `absulli.db` to bug reports or commit it to a repository. ABSulli restricts the directory to its container user and creates sensitive files with owner-only permissions.
+
 ---
 
 ## Upgrading
@@ -178,4 +180,3 @@ ABSulli ships with the following enabled by default:
 Authentication is required after setup and recommended for all installs.
 
 ---
-
