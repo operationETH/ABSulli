@@ -20,6 +20,7 @@ from absulli.database.session import SessionLocal
 
 PUBLIC_PATH_PREFIXES = (
     "/static/",
+    "/notification-covers/",
 )
 
 PUBLIC_PATHS = {
@@ -47,6 +48,17 @@ SECURITY_HEADER_KEYS = {
 }
 
 
+def notification_cover_token(item_id: str) -> str:
+    settings = get_settings()
+    secret = settings.secret_key.get_secret_value().encode("utf-8")
+    value = f"notification-cover:{item_id}".encode("utf-8")
+    return hmac.new(secret, value, hashlib.sha256).hexdigest()
+
+
+def valid_notification_cover_token(item_id: str, token: str) -> bool:
+    return hmac.compare_digest(notification_cover_token(item_id), str(token or ""))
+
+
 def _content_security_policy(nonce: str | None = None) -> str:
     settings = get_settings()
     policy = settings.content_security_policy
@@ -55,7 +67,10 @@ def _content_security_policy(nonce: str | None = None) -> str:
     return policy.replace("'nonce-{nonce}'", "'none'")
 
 
-def _security_raw_headers(nonce: str | None = None) -> list[tuple[bytes, bytes]]:
+def _security_raw_headers(
+    nonce: str | None = None,
+    cross_origin_resource_policy: bytes = b"same-origin",
+) -> list[tuple[bytes, bytes]]:
     settings = get_settings()
 
     raw_headers: list[tuple[bytes, bytes]] = [
@@ -67,7 +82,7 @@ def _security_raw_headers(nonce: str | None = None) -> list[tuple[bytes, bytes]]
             b"camera=(), microphone=(), geolocation=(), payment=(), usb=()",
         ),
         (b"cross-origin-opener-policy", b"same-origin"),
-        (b"cross-origin-resource-policy", b"same-origin"),
+        (b"cross-origin-resource-policy", cross_origin_resource_policy),
     ]
 
     if settings.effective_security_csp_enabled:
@@ -99,12 +114,13 @@ def _security_raw_headers(nonce: str | None = None) -> list[tuple[bytes, bytes]]
 def _replace_security_headers(
     raw_headers: list[tuple[bytes, bytes]],
     nonce: str | None = None,
+    cross_origin_resource_policy: bytes = b"same-origin",
 ) -> list[tuple[bytes, bytes]]:
     return [
         (key, value)
         for key, value in raw_headers
         if key.lower() not in SECURITY_HEADER_KEYS
-    ] + _security_raw_headers(nonce)
+    ] + _security_raw_headers(nonce, cross_origin_resource_policy)
 
 
 class SecurityHeadersMiddleware:
@@ -128,9 +144,19 @@ class SecurityHeadersMiddleware:
             await auth_response(scope, receive, send)
             return
 
+        cross_origin_resource_policy = (
+            b"cross-origin"
+            if request.url.path.startswith("/notification-covers/")
+            else b"same-origin"
+        )
+
         async def send_with_security_headers(message):
             if message["type"] == "http.response.start":
-                message["headers"] = _replace_security_headers(message.get("headers", []), csp_nonce)
+                message["headers"] = _replace_security_headers(
+                    message.get("headers", []),
+                    csp_nonce,
+                    cross_origin_resource_policy,
+                )
 
             await send(message)
 
@@ -162,12 +188,10 @@ class SecurityHeadersMiddleware:
                 media_type="text/plain",
             )
 
-        if path == "/metrics" and _valid_metrics_token(request):
-            request.state.absulli_authenticated = True
-            request.state.absulli_auth_method = "metrics_token"
+        if path == "/metrics" and settings.effective_metrics_token:
             return None
 
-        if path != "/metrics" and _valid_api_token(request):
+        if _valid_api_token(request):
             request.state.absulli_authenticated = True
             request.state.absulli_auth_method = "api_token"
             return None
@@ -272,18 +296,6 @@ def _valid_api_token(request: Request) -> bool:
         provided = _extract_bearer_token(request.headers.get("Authorization"))
     if not provided:
         provided = request.headers.get("X-Absulli-Api-Token", "").strip()
-    return bool(provided and secrets.compare_digest(provided, expected))
-
-
-def _valid_metrics_token(request: Request) -> bool:
-    settings = get_settings()
-    expected = settings.effective_metrics_token
-    if not expected:
-        return False
-
-    provided = _extract_bearer_token(request.headers.get("Authorization"))
-    if not provided:
-        provided = request.headers.get("X-Absulli-Metrics-Token", "").strip()
     return bool(provided and secrets.compare_digest(provided, expected))
 
 

@@ -244,6 +244,7 @@
           {% if api_settings.token_from_env %}<div class="settings-row-badges"><em>Managed by .env</em></div>{% endif %}
         </div>
         <div class="settings-row-control api-key-control">
+          {% if api_settings.token %}
           <div class="api-key-input-group">
             <input id="absulli-api-key" type="text" value="{{ '•' * 48 }}" data-api-key-value="{{ api_settings.token }}" data-api-key-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="ABSulli API key">
             <button type="button" class="secondary api-key-icon-button" data-api-key-toggle aria-label="Show API key" title="Show API key">
@@ -260,6 +261,9 @@
             {% endif %}
           </div>
           <small id="api-key-copy-status" hidden>Copied.</small>
+          {% else %}
+          <small>Enable the API and save to generate a key.</small>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -269,7 +273,7 @@
     </div>
   </form>
 
-  {% if not api_settings.token_from_env %}
+  {% if api_settings.token and not api_settings.token_from_env %}
   <form id="api-regenerate-form" method="post" action="/settings/api/regenerate">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>
@@ -327,9 +331,12 @@
       <div class="form-grid">
         {% for field in agent.fields %}
           {% if field.type == 'checkbox' %}
-          <label class="settings-check field-check">
+          <label class="settings-check field-check{% if field.full_row %} full-row{% endif %}{% if field.helper %} with-help{% endif %}">
             <input type="checkbox" name="{{ field.name }}" {% if field.value == 'true' %}checked{% endif %} {% if field.from_env %}disabled{% endif %}>
-            <span>{{ field.label }}</span>
+            <span class="field-check-text">
+              <span>{{ field.label }}</span>
+              {% if field.helper %}<small>{{ field.helper }}</small>{% endif %}
+            </span>
           </label>
           {% else %}
           <label>
@@ -363,8 +370,111 @@
         </div>
       </div>
 
+      <input type="hidden" name="{{ agent.id }}_advanced_open" value="{{ 'true' if agent.advanced_open else 'false' }}" data-agent-advanced-state>
+      <div class="agent-advanced-settings" data-agent-advanced-content {% if not agent.advanced_open %}hidden{% endif %}>
+      <div class="notification-events notification-libraries">
+        <input type="hidden" name="{{ agent.id }}_library_scope_present" value="1">
+        <h3>Libraries</h3>
+        <p class="form-help">Choose the Audiobookshelf libraries this agent should monitor for playback and new media notifications. Connection notifications apply globally.</p>
+        <div class="event-list" data-library-scope>
+          <label class="event-option">
+            <input type="checkbox" name="{{ agent.id }}_all_libraries" data-all-libraries {% if agent.library_scope.all_libraries %}checked{% endif %}>
+            <span>
+              <strong>All libraries</strong>
+              <small>Include all detected libraries, including libraries added later.</small>
+            </span>
+          </label>
+          {% for library in agent.library_scope.libraries %}
+          <label class="event-option{% if agent.library_scope.all_libraries %} is-disabled{% endif %}">
+            <input type="checkbox" name="{{ agent.id }}_library_ids" value="{{ library.id }}" data-library-option {% if library.selected %}checked{% endif %} {% if agent.library_scope.all_libraries %}disabled{% endif %}>
+            <span>
+              <strong>{{ library.name }}</strong>
+              <small>{{ library.media_type|title }}</small>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      {% if agent.id != 'webhook' %}
+      <div class="notification-events notification-templates">
+        <h3>Message Templates</h3>
+        <p class="form-help">Customize notification text by event. Leave a field blank to use the default ABSulli message.</p>
+        <details class="template-variable-help">
+          <summary>Available variables</summary>
+          <div class="template-variable-groups">
+            {% for group in agent.template_variable_groups %}
+            <div class="template-variable-group">
+              <strong>{{ group.label }}</strong>
+              <div class="template-variable-list">
+                {% for variable, description in group.variables %}
+                <button type="button" class="template-variable" data-template-variable="{{ variable }}" title="{{ description }}" aria-label="Insert {{ variable }}">{{ variable }}</button>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <p class="template-variable-note">Descriptions are shortened for notifications. Cover art and the Audiobookshelf action link are added automatically when their agent options are enabled.</p>
+        </details>
+        <div class="notification-template-list">
+          {% for template in agent.message_templates %}
+          <details class="notification-template">
+            <summary>{{ template.label }}</summary>
+            <div class="notification-template-fields">
+              <label>
+                <span>Title template</span>
+                <input name="{{ template.title_setting }}" type="text" value="{{ template.title_template }}" autocomplete="off" placeholder="Use default title">
+              </label>
+              <label>
+                <span>Body template</span>
+                <textarea name="{{ template.body_setting }}" rows="3" placeholder="Use default body">{{ template.body_template }}</textarea>
+              </label>
+            </div>
+          </details>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% if agent.id == 'webhook' %}
+      <div class="notification-events webhook-advanced-payloads">
+        <h3>Webhook Payload</h3>
+        <p class="form-help">Customize the JSON body sent for every enabled webhook event.</p>
+        <label class="webhook-headers-field">
+          <span>Authorization Header</span>
+          <input name="webhook_authorization_header" type="text" value="{{ agent.webhook_authorization_header }}" autocomplete="off" placeholder="Optional">
+        </label>
+        <div class="webhook-custom-headers" data-webhook-custom-headers>
+          <div class="webhook-custom-headers-heading">
+            <span>Custom Headers</span>
+            <button type="button" class="secondary" data-webhook-add-header>Add Header</button>
+          </div>
+          <small>Add custom HTTP headers to include with webhook requests.</small>
+          <div class="webhook-custom-header-list" data-webhook-header-list>
+            {% for name, value in agent.webhook_custom_headers.items() %}
+            <div class="webhook-custom-header-row">
+              <input name="webhook_custom_header_name" type="text" value="{{ name }}" placeholder="Header Name" autocomplete="off">
+              <input name="webhook_custom_header_value" type="text" value="{{ value }}" placeholder="Header Value" autocomplete="off">
+              <button type="button" class="secondary" data-webhook-remove-header>Remove</button>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <label class="webhook-payload-editor">
+          <span>JSON Payload</span>
+          <textarea name="webhook_payload_template" rows="24" spellcheck="false">{{ agent.webhook_payload_template }}</textarea>
+        </label>
+        <div class="webhook-payload-actions">
+          <button type="button" class="secondary" data-webhook-reset-payload>Reset to Default</button>
+        </div>
+        <script type="application/json" nonce="{{ request.state.absulli_csp_nonce | default('') }}" data-webhook-default-payload>{{ agent.webhook_default_payload|tojson }}</script>
+      </div>
+      {% endif %}
+      </div>
+
       <div id="{{ agent.id }}-test-result" class="setup-test-result" hidden></div>
       <div class="form-actions">
+        <button type="button" class="secondary" data-agent-advanced-toggle aria-expanded="{{ 'true' if agent.advanced_open else 'false' }}">Advanced</button>
         <button type="button" class="secondary" data-agent-test="{{ agent.id }}">Test</button>
         <button type="submit">Save Changes</button>
       </div>

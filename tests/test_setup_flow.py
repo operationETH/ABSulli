@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -5,6 +7,31 @@ import absulli.core.security as security
 import absulli.web.routes as web_routes
 from absulli.core.config import get_settings
 from absulli.web.routes import router as web_router
+
+
+def test_initial_setup_import_closes_client_after_failure(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        async def aclose(self):
+            calls.append("close")
+
+    class FakeScheduler:
+        def __init__(self, settings):
+            self.client = FakeClient()
+
+        async def poll_history(self):
+            calls.append("history")
+
+        async def poll_activity(self):
+            calls.append("activity")
+            raise RuntimeError("poll failed")
+
+    monkeypatch.setattr(web_routes, "AbsulliScheduler", FakeScheduler)
+
+    asyncio.run(web_routes.run_initial_setup_import())
+
+    assert calls == ["history", "activity", "close"]
 
 
 def make_setup_client(monkeypatch):

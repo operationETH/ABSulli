@@ -3,9 +3,10 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
+from absulli.core.config import get_settings
 from absulli.database.models import ActivitySession, Library, MediaItem
 from absulli.http.abs_client import AudiobookshelfClient
-from absulli.http.normalizers import normalize_online_payload, utcnow
+from absulli.http.normalizers import normalize_item_notification_context, normalize_online_payload, normalize_podcast_playback_context, utcnow
 from absulli.notifiers.manager import NotificationManager
 from absulli.monitors.utils import friendly_names
 
@@ -45,6 +46,36 @@ class ActivityMonitor:
             library_id = session.get("library_id") or ""
             if not session.get("library_name") and library_id in library_names:
                 session["library_name"] = library_names[library_id]
+
+    async def _notification_context(self, session: dict) -> dict[str, object]:
+        context = {
+            "item_id": session.get("abs_item_id") or "",
+            "title": session.get("title") or "",
+            "author": session.get("author") or "",
+            "library_name": session.get("library_name") or "",
+            "username": session.get("username") or "",
+            "media_type": session.get("media_type") or "",
+        }
+        item_id = str(context["item_id"] or "").strip()
+        if not item_id:
+            return context
+        try:
+            payload = await self.client.get_item(item_id, expanded=True)
+        except Exception as exc:
+            log.debug("Playback notification metadata lookup failed for %s: %s", item_id, exc)
+            return context
+        if str(context.get("media_type") or "").lower() == "podcast":
+            metadata = normalize_podcast_playback_context(
+                payload,
+                episode_title=str(session.get("title") or ""),
+                episode_id=str(session.get("episode_id") or ""),
+            )
+        else:
+            metadata = normalize_item_notification_context(payload)
+        for key, value in metadata.items():
+            if value:
+                context[key] = value
+        return context
 
     async def poll(self, db: Session) -> int:
         payload = await self.client.get_online_users()
@@ -88,9 +119,12 @@ class ActivityMonitor:
                     "playback_start",
                     f"{session['username']} started listening",
                     session["title"],
+                    library_id=session.get("library_id") or "",
+                    context=await self._notification_context(session),
                 )
 
-        stale_cutoff = now - timedelta(seconds=45)
+        stale_seconds = max(45, get_settings().effective_abs_poll_interval * 3)
+        stale_cutoff = now - timedelta(seconds=stale_seconds)
         stale_query = db.query(ActivitySession).filter(
             ActivitySession.is_active.is_(True),
             ActivitySession.last_seen_at < stale_cutoff,
@@ -105,6 +139,15 @@ class ActivityMonitor:
                 "playback_stop",
                 f"{row.username} stopped listening",
                 row.title,
+                library_id=row.library_id or "",
+                context=await self._notification_context({
+                    "abs_item_id": row.abs_item_id or "",
+                    "title": row.title or "",
+                    "author": row.author or "",
+                    "library_name": row.library_name or "",
+                    "username": row.username or "",
+                    "media_type": row.media_type or "",
+                }),
             )
 
         db.commit()

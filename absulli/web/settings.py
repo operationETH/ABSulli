@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import secrets
@@ -23,6 +24,7 @@ from absulli.notifiers.agents import (
     TelegramAgent,
     WebhookAgent,
 )
+from absulli.notifiers.manager import WEBHOOK_DEFAULT_PAYLOAD
 
 log = logging.getLogger(__name__)
 
@@ -147,6 +149,122 @@ NOTIFICATION_EVENT_SETTINGS = {
     },
 }
 
+NOTIFICATION_TEMPLATE_VARIABLE_GROUPS = [
+    {
+        "label": "Media",
+        "variables": [
+            ("{author}", "Author"),
+            ("{description}", "Short book or current media description"),
+            ("{episode}", "Episode title"),
+            ("{episode_description}", "Short episode description"),
+            ("{language}", "Language"),
+            ("{library}", "Library name"),
+            ("{media_type}", "Media type"),
+            ("{narrator}", "Narrator"),
+            ("{podcast}", "Podcast title"),
+            ("{podcast_description}", "Short podcast description"),
+            ("{publisher}", "Publisher"),
+            ("{series}", "Series"),
+            ("{subtitle}", "Subtitle"),
+            ("{title}", "Media title"),
+            ("{year}", "Published year"),
+        ],
+    },
+    {
+        "label": "Links and IDs",
+        "variables": [
+            ("{apple_podcasts_url}", "Apple Podcasts URL"),
+            ("{asin}", "Audible ASIN"),
+            ("{audiobookshelf_url}", "Direct Audiobookshelf item URL"),
+            ("{cover_url}", "Signed cover image URL"),
+            ("{isbn}", "ISBN"),
+            ("{item_id}", "Audiobookshelf item ID"),
+            ("{itunes_id}", "Apple Podcasts iTunes ID"),
+        ],
+    },
+    {
+        "label": "Notification",
+        "variables": [
+            ("{event_type}", "ABSulli event type"),
+            ("{notification_body}", "Default notification body"),
+            ("{notification_title}", "Default notification title"),
+            ("{username}", "User name"),
+        ],
+    },
+]
+
+
+WEBHOOK_TEMPLATE_VARIABLE_GROUPS = [
+    {
+        "label": group["label"],
+        "variables": list(group["variables"]),
+    }
+    for group in NOTIFICATION_TEMPLATE_VARIABLE_GROUPS
+]
+for group in WEBHOOK_TEMPLATE_VARIABLE_GROUPS:
+    if group["label"] == "Media":
+        group["variables"] = sorted(
+            group["variables"]
+            + [
+                ("{description_full}", "Full media description"),
+                ("{episode_description_full}", "Full episode description"),
+                ("{podcast_description_full}", "Full podcast description"),
+            ],
+            key=lambda item: item[0],
+        )
+    if group["label"] == "Links and IDs":
+        group["variables"] = sorted(
+            group["variables"]
+            + [
+                ("{audible_url}", "Audible item URL"),
+                ("{isbn_url}", "Libro.fm ISBN URL"),
+            ],
+            key=lambda item: item[0],
+        )
+
+
+def webhook_payload_template_context() -> str:
+    return setup_state.get_setup_setting("webhook_payload_template", "").strip() or WEBHOOK_DEFAULT_PAYLOAD
+
+
+def notification_templates_context(agent_id: str) -> list[dict[str, object]]:
+    templates = []
+    for event_type, meta in NOTIFICATION_EVENT_SETTINGS.items():
+        templates.append(
+            {
+                "event_type": event_type,
+                "label": meta["label"],
+                "title_setting": f"{agent_id}_{event_type}_title_template",
+                "body_setting": f"{agent_id}_{event_type}_body_template",
+                "title_template": setup_state.get_setup_setting(f"{agent_id}_{event_type}_title_template", ""),
+                "body_template": setup_state.get_setup_setting(f"{agent_id}_{event_type}_body_template", ""),
+            }
+        )
+    return templates
+
+
+def notification_advanced_open(agent_id: str) -> bool:
+    if bool_setting(f"{agent_id}_advanced_open", False):
+        return True
+    library_value = setup_state.get_setup_setting(f"{agent_id}_notification_libraries", "")
+    if library_value not in {"", "*"}:
+        return True
+    if agent_id != "webhook" and any(
+        setup_state.get_setup_setting(f"{agent_id}_{event_type}_{part}_template", "").strip()
+        for event_type in NOTIFICATION_EVENT_SETTINGS
+        for part in ("title", "body")
+    ):
+        return True
+    if agent_id == "webhook":
+        if setup_state.get_setup_setting("webhook_authorization_header", "").strip():
+            return True
+        if setup_state.get_setup_setting("webhook_custom_headers_json", "").strip():
+            return True
+        payload_template = setup_state.get_setup_setting("webhook_payload_template", "").strip()
+        if payload_template and payload_template != WEBHOOK_DEFAULT_PAYLOAD:
+            return True
+    return False
+
 GENERAL_FIELD_CONFIGS = [
     {"name": "abs_url", "label": "Audiobookshelf URL", "type": "url", "required": True, "placeholder": "http://audiobookshelf:13378"},
     {"name": "abs_api_key", "label": "Audiobookshelf API Key", "type": "password", "required": True, "placeholder": ""},
@@ -157,6 +275,13 @@ GENERAL_FIELD_CONFIGS = [
 ]
 
 NETWORK_FIELD_CONFIGS = [
+    {
+        "name": "public_url",
+        "label": "ABSulli Public URL",
+        "description": "Base URL used for notification cover art. Leave blank to disable cover art in rich notifications.",
+        "type": "url",
+        "placeholder": "https://absulli.example.com",
+    },
     {
         "name": "trust_proxy",
         "label": "Trust Reverse Proxy Headers",
@@ -178,7 +303,6 @@ NETWORK_FIELD_CONFIGS = [
         "type": "checkbox",
         "default": False,
         "restart_required": True,
-        "advanced_note": "Advanced HSTS options can be changed in a .env file.",
     },
     {
         "name": "metrics_token",
@@ -190,11 +314,9 @@ NETWORK_FIELD_CONFIGS = [
     {
         "name": "cors_allowed_origins",
         "label": "CORS Allowed Origins",
-        "description": "Allow browser requests from specific external origins. Leave blank to disable CORS.",
+        "description": "Allow browser requests from specific external origins. Leave blank to disable CORS. Changes apply immediately.",
         "type": "text",
         "placeholder": "https://absulli.example.com, https://example.com",
-        "restart_required": True,
-        "advanced_note": "Methods, headers, and credentials use defaults. Advanced CORS options can be changed in a .env file.",
     },
 ]
 
@@ -217,7 +339,8 @@ AGENT_FIELD_CONFIGS = {
             {"name": "email_to", "label": "To Address", "type": "email", "required": True, "placeholder": "you@example.com"},
             {"name": "email_smtp_username", "label": "SMTP Username", "type": "text", "required": False, "placeholder": "optional"},
             {"name": "email_smtp_password", "label": "SMTP Password", "type": "password", "required": False, "placeholder": "optional"},
-            {"name": "email_use_tls", "label": "Use SSL/TLS", "type": "checkbox", "required": False, "default": True},
+            {"name": "email_use_tls", "label": "Use SSL/TLS", "type": "checkbox", "required": False, "default": True, "helper": "Use implicit TLS, normally on port 465."},
+            {"name": "email_use_starttls", "label": "Use STARTTLS", "type": "checkbox", "required": False, "default": False, "helper": "Upgrade the connection to TLS, normally on port 587."},
         ],
     },
     "discord": {
@@ -226,6 +349,8 @@ AGENT_FIELD_CONFIGS = {
         "icon_template": "partials/notification_icons/discord.svg",
         "fields": [
             {"name": "discord_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://discord.com/api/webhooks/..."},
+            {"name": "discord_include_cover_art", "label": "Include Cover Art", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Show the media cover in rich notifications."},
+            {"name": "discord_open_in_audiobookshelf", "label": "Open in Audiobookshelf", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Add a link that opens the item in Audiobookshelf."},
         ],
     },
     "gotify": {
@@ -235,6 +360,8 @@ AGENT_FIELD_CONFIGS = {
         "fields": [
             {"name": "gotify_url", "label": "Server URL", "type": "url", "required": True, "placeholder": ""},
             {"name": "gotify_token", "label": "Application Token", "type": "password", "required": True, "placeholder": ""},
+            {"name": "gotify_include_cover_art", "label": "Include Cover Art", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Show the media cover in rich notifications."},
+            {"name": "gotify_open_in_audiobookshelf", "label": "Open in Audiobookshelf", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Add a link that opens the item in Audiobookshelf."},
         ],
     },
     "ntfy": {
@@ -252,6 +379,7 @@ AGENT_FIELD_CONFIGS = {
         "icon_template": "partials/notification_icons/pushbullet.svg",
         "fields": [
             {"name": "pushbullet_token", "label": "Access Token", "type": "password", "required": True, "placeholder": ""},
+            {"name": "pushbullet_open_in_audiobookshelf", "label": "Open in Audiobookshelf", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Open the item directly from the Pushbullet notification."},
         ],
     },
     "pushover": {
@@ -367,6 +495,49 @@ def bool_setting(name: str, default: bool = False) -> bool:
     if value == "":
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def notification_library_scope_context(agent_id: str, libraries: list[Library]) -> dict[str, object]:
+    value = setup_state.get_setup_setting(f"{agent_id}_notification_libraries", "")
+    all_libraries = value in {"", "*"}
+    selected: set[str] = set()
+    if not all_libraries:
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError):
+            decoded = None
+        if isinstance(decoded, list):
+            selected = {str(item) for item in decoded if item}
+        else:
+            all_libraries = True
+    return {
+        "all_libraries": all_libraries,
+        "libraries": [
+            {
+                "id": library.abs_library_id,
+                "name": library.name or library.abs_library_id,
+                "media_type": library.media_type or "unknown",
+                "selected": library.abs_library_id in selected,
+            }
+            for library in libraries
+        ],
+    }
+
+
+def notification_library_value_from_form(agent_id: str, form, libraries: list[Library]) -> str:
+    if form.get(f"{agent_id}_library_scope_present") != "1":
+        return setup_state.get_setup_setting(f"{agent_id}_notification_libraries", "") or "*"
+    if form.get(f"{agent_id}_all_libraries") == "on":
+        return "*"
+    known_ids = {library.abs_library_id for library in libraries}
+    selected = sorted(
+        {
+            str(value).strip()
+            for value in form.getlist(f"{agent_id}_library_ids")
+            if str(value).strip() in known_ids
+        }
+    )
+    return json.dumps(selected)
 
 
 def notification_events_context(agent_id: str) -> list[dict[str, object]]:
@@ -588,7 +759,7 @@ def user_values_from_form(settings, form) -> tuple[dict[str, str], bool]:
 
 
 def api_settings_context(settings) -> dict[str, object]:
-    token = settings.effective_api_token or setup_state.ensure_api_token()
+    token = settings.effective_api_token
     return {
         "enabled": settings.effective_api_enabled,
         "enabled_from_env": settings.api_enabled_from_env,
@@ -600,9 +771,10 @@ def api_settings_context(settings) -> dict[str, object]:
 
 def api_values_from_form(settings, form) -> dict[str, str]:
     values: dict[str, str] = {}
+    enabled = settings.effective_api_enabled if settings.api_enabled_from_env else form.get("api_enabled") == "on"
     if not settings.api_enabled_from_env:
-        values["api_enabled"] = "true" if form.get("api_enabled") == "on" else "false"
-    if not settings.api_token_from_env:
+        values["api_enabled"] = "true" if enabled else "false"
+    if enabled and not settings.api_token_from_env and not settings.effective_api_token:
         values["api_token"] = setup_state.ensure_api_token()
     return values
 
@@ -635,6 +807,8 @@ def network_values_from_form(settings, form) -> dict[str, str]:
         raise ValueError("Metrics token cannot be change_me")
     if "cors_allowed_origins" in values:
         values["cors_allowed_origins"] = clean_cors_origins(values.get("cors_allowed_origins", ""))
+    if "public_url" in values:
+        values["public_url"] = clean_http_url(values.get("public_url", ""), "ABSulli Public URL")
     return values
 
 
@@ -675,8 +849,9 @@ def saved_field_value(settings, field_name: str, field: dict[str, object]) -> st
     return setup_state.get_setup_setting(field_name, "")
 
 
-def agent_settings_context(settings) -> list[dict[str, object]]:
+def agent_settings_context(settings, libraries: list[Library] | None = None) -> list[dict[str, object]]:
     agents = []
+    libraries = libraries or []
     for agent_id, config in AGENT_FIELD_CONFIGS.items():
         fields = []
         configured = True
@@ -705,6 +880,14 @@ def agent_settings_context(settings) -> list[dict[str, object]]:
                 "env_managed": env_managed,
                 "fields": fields,
                 "notification_events": notification_events_context(agent_id),
+                "library_scope": notification_library_scope_context(agent_id, libraries),
+                "message_templates": notification_templates_context(agent_id),
+                "template_variable_groups": NOTIFICATION_TEMPLATE_VARIABLE_GROUPS,
+                "advanced_open": notification_advanced_open(agent_id),
+                "webhook_authorization_header": setup_state.get_setup_setting("webhook_authorization_header", "") if agent_id == "webhook" else "",
+                "webhook_custom_headers": json.loads(setup_state.get_setup_setting("webhook_custom_headers_json", "") or "{}") if agent_id == "webhook" else {},
+                "webhook_payload_template": webhook_payload_template_context() if agent_id == "webhook" else "",
+                "webhook_default_payload": WEBHOOK_DEFAULT_PAYLOAD if agent_id == "webhook" else "",
             }
         )
     return agents
@@ -735,6 +918,8 @@ def clean_agent_url_fields(agent_id: str, values: dict[str, str]) -> dict[str, s
         if port < 1 or port > 65535:
             raise ValueError("SMTP port must be between 1 and 65535")
         cleaned["email_smtp_port"] = str(port)
+    if agent_id == "email" and cleaned.get("email_use_tls") == "true" and cleaned.get("email_use_starttls") == "true":
+        raise ValueError("Choose either SSL/TLS or STARTTLS, not both")
     return cleaned
 
 
@@ -772,7 +957,17 @@ def agent_from_values(agent_id: str, values: dict[str, str]):
     if agent_id == "pushbullet":
         return PushbulletAgent(values["pushbullet_token"])
     if agent_id == "webhook":
-        return WebhookAgent(values["webhook_url"])
+        headers = {}
+        authorization = values.get("webhook_authorization_header", "").strip()
+        if authorization:
+            headers["Authorization"] = authorization
+        custom_headers_value = values.get("webhook_custom_headers_json", "")
+        custom_headers = json.loads(custom_headers_value) if custom_headers_value else {}
+        if isinstance(custom_headers, dict):
+            for key, value in custom_headers.items():
+                if str(key).lower() != "authorization" or not authorization:
+                    headers[str(key)] = str(value)
+        return WebhookAgent(values["webhook_url"], headers)
     if agent_id == "email":
         return EmailAgent(
             smtp_host=values["email_smtp_host"],
@@ -782,6 +977,6 @@ def agent_from_values(agent_id: str, values: dict[str, str]):
             username=values.get("email_smtp_username", ""),
             password=values.get("email_smtp_password", ""),
             use_tls=values.get("email_use_tls", "true").lower() in {"1", "true", "yes", "on"},
+            use_starttls=values.get("email_use_starttls", "false").lower() in {"1", "true", "yes", "on"},
         )
     raise ValueError("Unknown notification agent")
-

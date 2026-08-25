@@ -76,6 +76,7 @@ class Settings(BaseSettings):
 
     cookie_secure: bool = Field(default=False, alias="ABSULLI_COOKIE_SECURE")
     trust_proxy: bool = Field(default=False, alias="ABSULLI_TRUST_PROXY")
+    public_url: str = Field(default="", alias="ABSULLI_PUBLIC_URL")
 
     auth_login_max_attempts: int = Field(default=8, alias="ABSULLI_AUTH_LOGIN_MAX_ATTEMPTS")
     auth_login_window_seconds: int = Field(default=900, alias="ABSULLI_AUTH_LOGIN_WINDOW_SECONDS")
@@ -112,6 +113,7 @@ class Settings(BaseSettings):
     email_from: str = Field(default="", alias="EMAIL_FROM")
     email_to: str = Field(default="", alias="EMAIL_TO")
     email_use_tls: bool = Field(default=True, alias="EMAIL_USE_TLS")
+    email_use_starttls: bool = Field(default=False, alias="EMAIL_USE_STARTTLS")
     webhook_url: str = Field(default="", alias="WEBHOOK_URL")
 
     @model_validator(mode="after")
@@ -381,7 +383,18 @@ class Settings(BaseSettings):
 
     @property
     def effective_cors_allowed_origins(self) -> str:
-        return self.effective_setting("cors_allowed_origins") if not self.field_configured("cors_allowed_origins") else self.cors_allowed_origins
+        if self.field_configured("cors_allowed_origins"):
+            return self.cors_allowed_origins
+
+        try:
+            from absulli.core.setup_state import get_setup_setting_if_available
+
+            stored_value = get_setup_setting_if_available("cors_allowed_origins")
+        except Exception as exc:
+            log.debug("Unable to read stored setting cors_allowed_origins: %s", exc)
+            stored_value = ""
+
+        return str(stored_value or "").strip()
 
     @property
     def effective_cors_allow_credentials(self) -> bool:
@@ -394,14 +407,10 @@ class Settings(BaseSettings):
 
     @property
     def effective_cors_allowed_methods(self) -> str:
-        if self.field_configured("cors_allowed_methods"):
-            return self.cors_allowed_methods
         return self.cors_allowed_methods
 
     @property
     def effective_cors_allowed_headers(self) -> str:
-        if self.field_configured("cors_allowed_headers"):
-            return self.cors_allowed_headers
         return self.cors_allowed_headers
 
     @property

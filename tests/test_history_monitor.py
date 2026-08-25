@@ -640,9 +640,11 @@ def test_enrich_history_row_without_prefetched_lookups_uses_database_fallbacks()
 class FakeNotifier:
     def __init__(self):
         self.calls = []
+        self.contexts = []
 
-    async def notify(self, db, event_type, title, body):
-        self.calls.append((event_type, title, body))
+    async def notify(self, db, event_type, title, body, library_id="", context=None):
+        self.calls.append((event_type, title, body, library_id))
+        self.contexts.append(context or {})
 
 
 def test_new_book_notifications_start_after_silent_library_baseline():
@@ -687,8 +689,36 @@ def test_new_book_notifications_start_after_silent_library_baseline():
             "new_book",
             "New book added",
             "American Assassin by Vince Flynn was added to Audiobooks.",
+            "lib-1",
         )
     ]
+    assert notifier.contexts[0]["description"] == ""
+    db.close()
+
+
+def test_new_book_notification_context_strips_description_html():
+    db = make_db()
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(FakeClient(), notifier)
+
+    asyncio.run(
+        monitor._notify_new_books(
+            db,
+            [
+                {
+                    "abs_item_id": "item-1",
+                    "title": "I Must Betray You",
+                    "author": "Ruta Sepetys",
+                    "description": "<b>#1 <i>New York Times</i></b><br /><br />A historical thriller.",
+                    "library_id": "lib-1",
+                    "library_name": "Audiobooks",
+                    "media_type": "book",
+                }
+            ],
+        )
+    )
+
+    assert notifier.contexts[0]["description"] == "#1 New York Times\n\nA historical thriller."
     db.close()
 
 
@@ -744,8 +774,11 @@ def test_new_podcast_notifications_start_after_silent_library_baseline():
             "new_podcast",
             "New podcast added",
             "Darknet Diaries by Jack Rhysider was added to Podcasts.",
+            "lib-podcast",
         )
     ]
+    assert notifier.contexts[-1]["podcast"] == "Darknet Diaries"
+    assert notifier.contexts[-1]["podcast_title"] == "Darknet Diaries"
     db.close()
 
 
@@ -806,8 +839,40 @@ def test_new_podcast_episode_notifications_start_after_silent_episode_baseline(m
             "new_podcast_episode",
             "New podcast episode added",
             "The History of English Podcast - Episode 12: Early Greek, Hittite and the Trojan War (Extended Version) was added to Podcasts.",
+            "lib-podcast",
         )
     ]
+    db.close()
+
+
+def test_new_podcast_episode_notification_context_strips_description_html(monkeypatch):
+    monkeypatch.setattr("absulli.monitors.history.event_enabled", lambda event_type: event_type == "new_podcast_episode")
+    db = make_db()
+    library = Library(abs_library_id="lib-podcast", name="Podcasts", media_type="podcast", item_count=1)
+    db.add(library)
+    db.commit()
+    podcast = media_item_row(id="podcast-html", media={"metadata": {"title": "Example Show"}, "duration": 0})
+    client = FakeClient(
+        library_items={"lib-podcast": items_payload(podcast, total=1)},
+        items={
+            "podcast-html": {
+                "media": {
+                    "metadata": {"title": "Example Show", "description": "<p>Show<br />description</p>"},
+                    "episodes": [{"id": "episode-1", "title": "First"}],
+                }
+            }
+        },
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    client.items["podcast-html"]["media"]["episodes"].append(
+        {"id": "episode-2", "title": "Second", "description": "Episode one<br /><br />Episode two"}
+    )
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    context = notifier.contexts[-1]
+    assert context["podcast_description"] == "Show\ndescription"
+    assert context["episode_description"] == "Episode one\n\nEpisode two"
     db.close()
 
 
@@ -852,6 +917,7 @@ def test_new_podcast_episode_notifications_use_exact_episode_title(monkeypatch):
             "new_podcast_episode",
             "New podcast episode added",
             "Crime Junkie - MURDERED: Joyce LePage Part 2 was added to podcasts test.",
+            "lib-podcast",
         )
     ]
     db.close()

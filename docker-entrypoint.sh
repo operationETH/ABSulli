@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 ABSULLI_HOST="${ABSULLI_HOST:-0.0.0.0}"
 ABSULLI_PORT="${ABSULLI_PORT:-8272}"
@@ -20,6 +21,14 @@ else
     echo "Running ABSulli using current user (uid=$(id -u)) and group (gid=$(id -g))"
     USER_PREFIX=""
 fi
+
+chmod 700 "$ABSULLI_DATA_DIR"
+find "$ABSULLI_DATA_DIR" -maxdepth 1 -type f \( \
+    -name 'absulli.db' -o \
+    -name 'absulli.db-wal' -o \
+    -name 'absulli.db-shm' -o \
+    -name 'secret_key' \
+\) -exec chmod 600 {} \;
 
 if [ "$#" -ge 1 ] && [ "$1" = "uvicorn" ]; then
     exec $USER_PREFIX uvicorn absulli.main:app \

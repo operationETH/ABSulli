@@ -13,6 +13,7 @@ def make_client(monkeypatch, store=None):
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
     for key in [
         "ABSULLI_TRUST_PROXY",
+        "ABSULLI_PUBLIC_URL",
         "ABSULLI_COOKIE_SECURE",
         "ABSULLI_METRICS_TOKEN",
         "ABSULLI_SECURITY_HSTS_ENABLED",
@@ -40,6 +41,7 @@ def make_client(monkeypatch, store=None):
     monkeypatch.setattr(web_routes, "set_setup_setting", fake_set)
     monkeypatch.setattr(web_routes, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(setup_state, "get_setup_setting", fake_get)
+    monkeypatch.setattr(setup_state, "get_setup_setting_if_available", fake_get)
     monkeypatch.setattr(setup_state, "set_setup_setting", fake_set)
     monkeypatch.setattr(setup_state, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
@@ -63,6 +65,8 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
 
     assert response.status_code == 200
     assert "Network Settings" in response.text
+    assert "ABSulli Public URL" in response.text
+    assert "Base URL used for notification cover art" in response.text
     assert "Trust Reverse Proxy Headers" in response.text
     assert "Use X-Forwarded-For" in response.text
     assert 'name="trust_proxy" checked' in response.text
@@ -75,9 +79,7 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert 'data-metrics-token-regenerate' in response.text
     assert "HSTS Header" in response.text
     assert "CORS Allowed Origins" in response.text
-    assert "Restart Required" in response.text
-    assert "Methods, headers, and credentials use defaults" in response.text
-    assert "Advanced CORS options can be changed in a .env file" in response.text
+    assert "Changes apply immediately." in response.text
     assert "Content Security Policy" not in response.text
     assert "HSTS Max Age Seconds" not in response.text
     assert "CORS Allowed Methods" not in response.text
@@ -91,6 +93,7 @@ def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_t
         "/settings/network",
         data={
             "csrf_token": "valid-token",
+            "public_url": " https://absulli.example.com/ ",
             "trust_proxy": "on",
             "cookie_secure": "on",
             "metrics_token": "",
@@ -100,6 +103,7 @@ def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_t
 
     assert response.status_code == 303
     assert response.headers["location"] == "/settings?tab=network&saved=network"
+    assert store["public_url"] == "https://absulli.example.com"
     assert store["trust_proxy"] == "true"
     assert store["cookie_secure"] == "true"
     assert store["metrics_token"] == ""
@@ -109,6 +113,23 @@ def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_t
     assert "cors_allowed_methods" not in store
     assert "cors_allowed_headers" not in store
 
+
+
+def test_network_settings_rejects_invalid_public_url(monkeypatch):
+    client, store = make_client(monkeypatch)
+
+    response = client.post(
+        "/settings/network",
+        data={
+            "csrf_token": "valid-token",
+            "public_url": "absulli.example.com",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=ABSulli%20Public%20URL%20must%20start%20with%20http%3A//%20or%20https%3A//" in response.headers["location"]
+    assert store == {}
 
 def test_network_settings_rejects_change_me_metrics_token(monkeypatch):
     client, store = make_client(monkeypatch)

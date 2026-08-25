@@ -1,16 +1,16 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from absulli import __version__
 from absulli.core.config import get_settings
+from absulli.core.cors import DynamicCORSMiddleware
 from absulli.core.logging import configure_logging
 from absulli.core.cover_cache import prune_cover_cache
 from absulli.database.session import init_db
 from absulli.core.security import SecurityHeadersMiddleware
-from absulli.core.setup_state import is_setup_complete, warm_setup_state_cache
+from absulli.core.setup_state import ensure_api_token, is_setup_complete, warm_setup_state_cache
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.web.api import metrics_router, router as api_router
 from absulli.web.routes import router as web_router
@@ -24,6 +24,8 @@ scheduler = AbsulliScheduler(settings)
 async def lifespan(app: FastAPI):
     init_db()
     warm_setup_state_cache()
+    if settings.effective_api_enabled and not settings.effective_api_token:
+        ensure_api_token()
     prune_cover_cache(settings.data_dir)
     scheduler.start()
     yield
@@ -32,14 +34,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
 
-if settings.cors_allowed_origins_list:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_allowed_origins_list,
-        allow_credentials=settings.cors_allow_credentials,
-        allow_methods=settings.cors_allowed_methods_list,
-        allow_headers=settings.cors_allowed_headers_list,
-    )
+app.add_middleware(DynamicCORSMiddleware)
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.mount("/static", StaticFiles(directory="absulli/web/static"), name="static")
