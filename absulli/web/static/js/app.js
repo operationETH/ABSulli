@@ -649,9 +649,7 @@ function drawBarChart(canvas, chart) {
     .filter((_, index) => index % labelStep === 0)
     .map((text) => ctx.measureText(text).width);
   const longestLabel = Math.max(1, ...visibleWidths);
-  let cos = Math.min(Math.SQRT1_2, (spacing * labelStep) / longestLabel);
-  cos = Math.max(cos, 0.31);
-  const angle = Math.acos(cos);
+  const angle = (55 * Math.PI) / 180;
   const labelVertical = Math.min(112, longestLabel * Math.sin(angle) + 16);
 
   const pad = { top: 22, right: 20, bottom: Math.max(44, labelVertical + 12), left: 50 };
