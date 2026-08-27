@@ -32,7 +32,7 @@
 
 <section class="graphs-grid" data-graphs-root>
   {% for chart in graph_data.charts %}
-    <article class="graph-card {{ 'wide' if chart.type == 'line' else '' }}">
+    <article class="graph-card {{ 'wide' if chart.type == 'line' else '' }}{{ ' heatmap-card' if chart.type == 'heatmap' else '' }}">
       <div class="graph-card-head">
         <div>
           <h3>{{ chart.title }}</h3>

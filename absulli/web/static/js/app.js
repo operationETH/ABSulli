@@ -514,6 +514,9 @@ function graphHasData(chart) {
   if (chart.type === 'line') {
     return (chart.series || []).some((series) => (series.data || []).some((value) => Number(value || 0) > 0));
   }
+  if (chart.type === 'heatmap') {
+    return (chart.columns || []).some((col) => (col.days || []).some((cell) => cell && Number(cell.value || 0) > 0));
+  }
   return (chart.values || []).some((value) => Number(value || 0) > 0);
 }
 
@@ -601,9 +604,15 @@ function drawLineChart(canvas, chart) {
   ctx.font = '11px Helvetica, Arial, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  const step = Math.max(1, Math.ceil(labels.length / 12));
+  const perIndex = plotWidth / pointCount;
+  const step = Math.max(1, Math.ceil(60 / perIndex));
+  const labelCount = Math.max(2, Math.floor(pointCount / step) + 1);
+  const shownIndexes = new Set();
+  for (let k = 0; k < labelCount; k += 1) {
+    shownIndexes.add(Math.round((k * pointCount) / (labelCount - 1)));
+  }
   labels.forEach((label, index) => {
-    if (index % step !== 0 && index !== labels.length - 1) return;
+    if (!shownIndexes.has(index)) return;
     const x = pad.left + (plotWidth * index) / pointCount;
     ctx.fillText(label, x, height - pad.bottom + 18);
   });
@@ -620,14 +629,31 @@ function drawBarChart(canvas, chart) {
 
   const width = rect.width;
   const height = rect.height;
-  const pad = { top: 22, right: 20, bottom: 76, left: 50 };
   const labels = chart.labels || [];
   const values = (chart.values || []).map(Number);
   const maxValue = niceMax(Math.max(...values, 0));
-  const plotWidth = width - pad.left - pad.right;
-  const plotHeight = height - pad.top - pad.bottom;
-  const gap = Math.max(4, Math.min(12, plotWidth / Math.max(1, values.length) * 0.18));
+
+  ctx.font = '11px Helvetica, Arial, sans-serif';
+  const shownLabels = labels.map((label) => {
+    const text = String(label);
+    return text.length > 18 ? text.slice(0, 17) + '…' : text;
+  });
+
+  const plotWidth = width - 50 - 20;
+  const gap = Math.max(4, Math.min(12, (plotWidth / Math.max(1, values.length)) * 0.18));
   const barWidth = Math.max(4, (plotWidth - gap * Math.max(0, values.length - 1)) / Math.max(1, values.length));
+  const spacing = barWidth + gap;
+
+  const labelStep = values.length > 16 ? Math.ceil(values.length / 12) : 1;
+  const visibleWidths = shownLabels
+    .filter((_, index) => index % labelStep === 0)
+    .map((text) => ctx.measureText(text).width);
+  const longestLabel = Math.max(1, ...visibleWidths);
+  const angle = (55 * Math.PI) / 180;
+  const labelVertical = Math.min(112, longestLabel * Math.sin(angle) + 16);
+
+  const pad = { top: 22, right: 20, bottom: Math.max(44, labelVertical + 12), left: 50 };
+  const plotHeight = height - pad.top - pad.bottom;
 
   ctx.clearRect(0, 0, width, height);
   drawAxes(ctx, width, height, pad, maxValue);
@@ -644,14 +670,184 @@ function drawBarChart(canvas, chart) {
   ctx.font = '11px Helvetica, Arial, sans-serif';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  labels.forEach((label, index) => {
+  shownLabels.forEach((label, index) => {
+    if (index % labelStep !== 0) return;
     const x = pad.left + index * (barWidth + gap) + barWidth / 2;
     ctx.save();
-    ctx.translate(x, height - pad.bottom + 17);
-    ctx.rotate(-Math.PI / 4);
-    ctx.fillText(String(label).slice(0, 20), 0, 0);
+    ctx.translate(x, height - pad.bottom + 14);
+    ctx.rotate(-angle);
+    ctx.fillText(label, 0, 0);
     ctx.restore();
   });
+}
+
+function heatmapThresholds(values) {
+  const nz = values.filter((v) => v > 0).sort((a, b) => a - b);
+  if (nz.length === 0) return [1, 1, 1];
+  const q = (p) => nz[Math.min(nz.length - 1, Math.floor(p * nz.length))];
+  return [q(0.25), q(0.5), q(0.75)];
+}
+
+function heatmapColor(value, thresholds) {
+  const ramp = ['#242424', '#4d3c14', '#7d611e', '#b08a2a', '#d4ad45'];
+  if (value <= 0) return ramp[0];
+  if (value <= thresholds[0]) return ramp[1];
+  if (value <= thresholds[1]) return ramp[2];
+  if (value <= thresholds[2]) return ramp[3];
+  return ramp[4];
+}
+
+function ensureHeatmapTooltip() {
+  let tip = document.getElementById('heatmap-tooltip');
+  if (tip) return tip;
+  tip = document.createElement('div');
+  tip.id = 'heatmap-tooltip';
+  tip.style.cssText = 'position:fixed;z-index:9999;display:none;pointer-events:none;background:#000;color:#e6e6e6;border:1px solid #3c3c3c;border-radius:3px;padding:5px 8px;font:12px Helvetica,Arial,sans-serif;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.5);';
+  document.body.appendChild(tip);
+  return tip;
+}
+
+function formatHeatmapTip(cell, unit) {
+  let dateLabel = cell.date;
+  if (cell.date) {
+    const parts = String(cell.date).split('-').map(Number);
+    if (parts.length === 3) {
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+  }
+  let valueText;
+  if (/hour/i.test(unit || '')) valueText = `${cell.value} hours`;
+  else if (cell.value === 0) valueText = 'No plays';
+  else valueText = `${cell.value} play${cell.value === 1 ? '' : 's'}`;
+  return `${valueText} on ${dateLabel}`;
+}
+
+function bindHeatmapTooltip(canvas) {
+  if (canvas.__heatmapBound) return;
+  if (!window.matchMedia || !window.matchMedia('(hover: hover)').matches) return;
+  canvas.__heatmapBound = true;
+  const tip = ensureHeatmapTooltip();
+  canvas.addEventListener('mousemove', (event) => {
+    const cells = canvas.__heatmapCells || [];
+    const rect = canvas.getBoundingClientRect();
+    const mx = event.clientX - rect.left;
+    const my = event.clientY - rect.top;
+    let hit = null;
+    for (let i = 0; i < cells.length; i += 1) {
+      const c = cells[i];
+      if (mx >= c.x && mx <= c.x + c.size && my >= c.y && my <= c.y + c.size) { hit = c; break; }
+    }
+    if (!hit) { tip.style.display = 'none'; return; }
+    tip.textContent = formatHeatmapTip(hit, canvas.__heatmapUnit);
+    tip.style.display = 'block';
+    let left = event.clientX + 12;
+    let top = event.clientY - tip.offsetHeight - 10;
+    if (top < 6) top = event.clientY + 16;
+    const maxLeft = window.innerWidth - tip.offsetWidth - 8;
+    if (left > maxLeft) left = maxLeft;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  });
+  canvas.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+
+function drawHeatmap(canvas, chart) {
+  const ctx = canvas.getContext('2d');
+  const columns = chart.columns || [];
+  const cols = Math.max(1, columns.length);
+  const gap = 2;
+  const padLeft = 34;
+  const padTop = 20;
+  const padBottom = 26;
+  const compact = window.matchMedia('(max-width: 1180px)').matches;
+
+  canvas.style.height = '';
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || 320;
+  const availWidth = width - padLeft - 8;
+  const cell = Math.max(4, (availWidth - gap * (cols - 1)) / cols);
+  const gridHeight = 7 * cell + gap * 6;
+
+  let height;
+  let originY;
+  if (compact) {
+    height = Math.ceil(padTop + gridHeight + padBottom);
+    canvas.style.height = height + 'px';
+    originY = padTop;
+  } else {
+    height = rect.height || 284;
+    originY = padTop + Math.max(0, (height - padTop - padBottom - gridHeight) / 2);
+  }
+  const gridWidth = cols * cell + (cols - 1) * gap;
+
+  const scale = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(width * scale);
+  canvas.height = Math.floor(height * scale);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const dayValues = [];
+  columns.forEach((col) => (col.days || []).forEach((c) => {
+    if (c) dayValues.push(Number(c.value || 0));
+  }));
+  const thresholds = heatmapThresholds(dayValues);
+
+  ctx.font = '11px Helvetica, Arial, sans-serif';
+  ctx.fillStyle = '#888';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const weekdayLabels = ['Mon', '', 'Wed', '', 'Fri', '', ''];
+  for (let r = 0; r < 7; r += 1) {
+    if (!weekdayLabels[r]) continue;
+    ctx.fillText(weekdayLabels[r], padLeft - 6, originY + r * (cell + gap) + cell / 2);
+  }
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const cells = [];
+  let lastMonthX = -999;
+  columns.forEach((col, c) => {
+    const x = padLeft + c * (cell + gap);
+    if (col.month && x - lastMonthX >= 24) {
+      ctx.fillStyle = '#888';
+      ctx.fillText(col.month, x, originY - 8);
+      lastMonthX = x;
+    }
+    (col.days || []).forEach((cellData, r) => {
+      if (!cellData) return;
+      const y = originY + r * (cell + gap);
+      const value = Number(cellData.value || 0);
+      ctx.fillStyle = heatmapColor(value, thresholds);
+      ctx.fillRect(x, y, cell, cell);
+      cells.push({ x, y, size: cell, date: cellData.date, value });
+    });
+  });
+
+  const ramp = ['#242424', '#4d3c14', '#7d611e', '#b08a2a', '#d4ad45'];
+  const swatch = 11;
+  const swatchGap = 3;
+  const legendY = height - 10;
+  let legendX = padLeft + gridWidth - (ramp.length * (swatch + swatchGap) + 66);
+  if (legendX < padLeft) legendX = padLeft;
+  ctx.font = '11px Helvetica, Arial, sans-serif';
+  ctx.fillStyle = '#888';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Less', legendX, legendY);
+  legendX += 6;
+  for (let i = 0; i < ramp.length; i += 1) {
+    ctx.fillStyle = ramp[i];
+    ctx.fillRect(legendX, legendY - swatch / 2, swatch, swatch);
+    legendX += swatch + swatchGap;
+  }
+  ctx.fillStyle = '#888';
+  ctx.textAlign = 'left';
+  ctx.fillText('More', legendX + 4, legendY);
+
+  canvas.__heatmapCells = cells;
+  canvas.__heatmapUnit = chart.unit || 'Plays';
+  bindHeatmapTooltip(canvas);
 }
 
 function renderGraphs() {
@@ -673,6 +869,7 @@ function renderGraphs() {
     }
     if (card) card.classList.remove('is-empty');
     if (chart.type === 'line') drawLineChart(canvas, chart);
+    else if (chart.type === 'heatmap') drawHeatmap(canvas, chart);
     else drawBarChart(canvas, chart);
   });
 }

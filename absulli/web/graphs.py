@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -49,6 +49,54 @@ def make_line_chart(title: str, subtitle: str, labels: list[str], series: list[d
 
 def make_bar_chart(title: str, subtitle: str, labels: list[str], values: list[float], metric: str) -> dict:
     return {"type": "bar", "title": title, "subtitle": subtitle, "labels": labels, "values": values, "unit": graph_metric_label(metric)}
+
+
+def build_activity_heatmap(db: Session, metric: str, user_key: str, weeks: int = 52) -> dict:
+    total_days = weeks * 7
+    end_date = utcnow().date()
+    start_date = end_date - timedelta(days=total_days - 1)
+    since = utcnow() - timedelta(days=total_days)
+    query = db.query(ListeningHistory).filter(media_history_date() >= since)
+    if user_key != "all":
+        query = query.filter(ListeningHistory.username == user_key)
+
+    totals: dict[date, float] = {}
+    for row in query.all():
+        dt = row.started_at or row.updated_at or row.imported_at
+        if not dt:
+            continue
+        day = dt.date()
+        if day < start_date or day > end_date:
+            continue
+        totals[day] = totals.get(day, 0.0) + graph_row_value(row, metric)
+
+    aligned_start = start_date - timedelta(days=start_date.weekday())
+    columns: list[dict] = []
+    cursor = aligned_start
+    last_month: int | None = None
+    while cursor <= end_date:
+        cells: list[dict | None] = []
+        for offset in range(7):
+            day = cursor + timedelta(days=offset)
+            if start_date <= day <= end_date:
+                cells.append({"date": day.isoformat(), "value": round(totals.get(day, 0.0), 2)})
+            else:
+                cells.append(None)
+        first_day = next((date.fromisoformat(cell["date"]) for cell in cells if cell), None)
+        month_label = ""
+        if first_day and first_day.month != last_month:
+            month_label = first_day.strftime("%b")
+            last_month = first_day.month
+        columns.append({"month": month_label, "days": cells})
+        cursor += timedelta(days=7)
+
+    return {
+        "type": "heatmap",
+        "title": "Listening activity",
+        "subtitle": f"Last {weeks} weeks · {graph_metric_label(metric).lower()}",
+        "columns": columns,
+        "unit": graph_metric_label(metric),
+    }
 
 
 def build_graphs(db: Session, metric: str = "count", days: int = 30, user_key: str = "all") -> dict:
@@ -106,6 +154,7 @@ def build_graphs(db: Session, metric: str = "count", days: int = 30, user_key: s
 
     top_user_labels, top_user_values = bar_by(lambda row: row.username, "Unknown", 12)
     top_title_labels, top_title_values = bar_by(lambda row: row.title, "Unknown title", 12)
+    top_author_labels, top_author_values = bar_by(lambda row: row.author, "Unknown author", 12)
     top_library_labels, top_library_values = bar_by(lambda row: row.library_name or row.media_type, "Unknown", 10)
     top_platform_labels, top_platform_values = bar_by(lambda row: row.client or row.device or row.model, "Unknown", 10)
 
@@ -123,10 +172,12 @@ def build_graphs(db: Session, metric: str = "count", days: int = 30, user_key: s
             labels,
             line_by(lambda row: row.library_name or row.media_type or "Unknown", "Unknown", 5),
         ),
+        build_activity_heatmap(db, metric, user_key),
         make_bar_chart("Listening by hour of day", subtitle, [f"{hour:02d}:00" for hour in range(24)], hour_values, metric),
         make_bar_chart("Listening by weekday", subtitle, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], weekday_values, metric),
         make_bar_chart("Top users", subtitle, top_user_labels, top_user_values, metric),
         make_bar_chart("Top titles", subtitle, top_title_labels, top_title_values, metric),
+        make_bar_chart("Top authors", subtitle, top_author_labels, top_author_values, metric),
         make_bar_chart("Top libraries", subtitle, top_library_labels, top_library_values, metric),
         make_bar_chart("Top platforms", subtitle, top_platform_labels, top_platform_values, metric),
     ]

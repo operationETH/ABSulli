@@ -1332,6 +1332,7 @@ button.secondary { background: #262626; color: #ddd; border-color: #444; }
   min-width: 0;
 }
 .graph-card.wide { grid-column: span 2; }
+.graph-card.heatmap-card { grid-column: span 2; }
 .graph-card-head {
   display: flex;
   align-items: center;
@@ -1368,6 +1369,8 @@ button.secondary { background: #262626; color: #ddd; border-color: #444; }
 
 @media (max-width: 1180px) {
   .graph-card.wide { grid-column: span 1; }
+  .graph-card.heatmap-card { grid-column: span 1; }
+  .graph-card.heatmap-card .graph-canvas-wrap { height: auto; }
 }
 
 @media (max-width: 760px) {
