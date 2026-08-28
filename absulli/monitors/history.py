@@ -274,11 +274,7 @@ class HistoryMonitor:
 
     def _history_model_values(self, row: dict) -> dict:
         values = dict(row)
-        if hasattr(ListeningHistory, "raw_json"):
-            raw_json = values.get("raw_json", dict(row))
-            values["raw_json"] = raw_json if isinstance(raw_json, str) else json.dumps(raw_json, default=str)
-        else:
-            values.pop("raw_json", None)
+        values.pop("raw_json", None)
         return {key: value for key, value in values.items() if hasattr(ListeningHistory, key)}
 
     def _libraries_by_abs_id(self, db: Session) -> dict[str, Library]:
@@ -355,12 +351,6 @@ class HistoryMonitor:
             except (TypeError, ValueError):
                 continue
         return None
-
-    def _can_prune_library_items(self, payload, normalized_count: int, request_limit: int) -> bool:
-        total = self._payload_total(payload)
-        if total is not None:
-            return total <= normalized_count
-        return normalized_count < request_limit
 
     def _payload_has_next_page(
         self,

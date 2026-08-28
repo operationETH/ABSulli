@@ -218,22 +218,6 @@ def render_webhook_payload(template: str, values: dict[str, object]) -> object:
     return json.loads(rendered)
 
 
-def validate_webhook_headers(value: str) -> str:
-    source = str(value or "").strip()
-    if not source:
-        return ""
-    try:
-        parsed = json.loads(source)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Webhook headers must be valid JSON: {exc.msg}") from exc
-    if not isinstance(parsed, dict):
-        raise ValueError("Webhook headers must be a JSON object")
-    for key, item in parsed.items():
-        if not isinstance(key, str) or not isinstance(item, str):
-            raise ValueError("Webhook header names and values must be strings")
-    return json.dumps(parsed, separators=(",", ":"))
-
-
 def webhook_headers_from_values(
     authorization: str = "",
     custom_headers_json: str = "",

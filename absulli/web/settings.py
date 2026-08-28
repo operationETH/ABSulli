@@ -96,10 +96,6 @@ def clean_http_url(value: str, label: str) -> str:
     return url
 
 
-def clean_gotify_url(value: str) -> str:
-    return clean_http_url(value, "Gotify URL")
-
-
 def clean_agent_value(value: str) -> str:
     return str(value or "").strip()
 
