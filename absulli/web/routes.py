@@ -1473,7 +1473,7 @@ async def settings_notification_agent_save(request: Request, agent_id: str, db: 
     is_enabled = form.get("enabled") == "on"
 
     for meta in NOTIFICATION_EVENT_SETTINGS.values():
-        setting_name = f"{agent_id}_{meta["setting"]}"
+        setting_name = f"{agent_id}_{meta['setting']}"
         values[setting_name] = "true" if form.get(setting_name) == "on" else "false"
 
     values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"
