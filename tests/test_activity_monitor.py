@@ -148,6 +148,56 @@ def test_poll_skips_notification_metadata_when_events_are_disabled(monkeypatch):
     db.close()
 
 
+def test_poll_commits_activity_updates_before_notifications(monkeypatch):
+    from sqlalchemy import event
+
+    db = make_db()
+    db.add(
+        ActivitySession(
+            session_key="stale-session",
+            abs_user_id="user-2",
+            username="Stopped User",
+            abs_item_id="item-2",
+            title="Stopped Book",
+            is_active=True,
+            last_seen_at=utcnow() - timedelta(seconds=90),
+        )
+    )
+    db.commit()
+
+    commit_count = 0
+
+    def after_commit(session):
+        nonlocal commit_count
+        commit_count += 1
+
+    class CommitAwareNotifier(FakeNotifier):
+        def __init__(self):
+            super().__init__()
+            self.commit_counts = []
+
+        async def notify(self, db, event_type, title, body, library_id="", context=None):
+            self.commit_counts.append(commit_count)
+            await super().notify(db, event_type, title, body, library_id=library_id, context=context)
+
+    monkeypatch.setattr("absulli.monitors.activity.event_enabled", lambda event_type: False)
+    notifier = CommitAwareNotifier()
+    monitor = ActivityMonitor(FakeClient(online_payload(online_session())), notifier)
+
+    event.listen(db, "after_commit", after_commit)
+    try:
+        asyncio.run(monitor.poll(db))
+    finally:
+        event.remove(db, "after_commit", after_commit)
+
+    assert notifier.commit_counts == [1, 1]
+    assert [event["event_type"] for event in notifier.events] == [
+        "playback_start",
+        "playback_stop",
+    ]
+    db.close()
+
+
 def test_poll_updates_existing_session_without_duplicate_start_notification():
     db = make_db()
     db.add(

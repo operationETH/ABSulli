@@ -109,6 +109,7 @@ class ActivityMonitor:
                 else []
             )
         }
+        pending_notifications: list[tuple[str, str, str, str, dict]] = []
 
         for session in sessions:
             existing = existing_sessions.get(session["session_key"])
@@ -123,13 +124,14 @@ class ActivityMonitor:
                 db.add(existing)
 
             if not was_active:
-                await self.notifier.notify(
-                    db,
-                    "playback_start",
-                    f"{session['username']} started listening",
-                    session["title"],
-                    library_id=session.get("library_id") or "",
-                    context=await self._notification_context_for_event("playback_start", session),
+                pending_notifications.append(
+                    (
+                        "playback_start",
+                        f"{session['username']} started listening",
+                        session["title"],
+                        session.get("library_id") or "",
+                        dict(session),
+                    )
                 )
 
         stale_seconds = max(45, get_settings().effective_abs_poll_interval * 3)
@@ -143,14 +145,12 @@ class ActivityMonitor:
 
         for row in stale_query.all():
             row.is_active = False
-            await self.notifier.notify(
-                db,
-                "playback_stop",
-                f"{row.username} stopped listening",
-                row.title,
-                library_id=row.library_id or "",
-                context=await self._notification_context_for_event(
+            pending_notifications.append(
+                (
                     "playback_stop",
+                    f"{row.username} stopped listening",
+                    row.title,
+                    row.library_id or "",
                     {
                         "abs_item_id": row.abs_item_id or "",
                         "title": row.title or "",
@@ -159,8 +159,22 @@ class ActivityMonitor:
                         "username": row.username or "",
                         "media_type": row.media_type or "",
                     },
-                ),
+                )
             )
 
         db.commit()
+
+        for event_type, title, body, library_id, notification_session in pending_notifications:
+            await self.notifier.notify(
+                db,
+                event_type,
+                title,
+                body,
+                library_id=library_id,
+                context=await self._notification_context_for_event(
+                    event_type,
+                    notification_session,
+                ),
+            )
+
         return len(sessions)
