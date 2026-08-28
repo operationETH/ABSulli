@@ -210,6 +210,10 @@ function initializeMediaBackgrounds(root = document) {
 function initializeAutoSubmit(root = document) {
   root.querySelectorAll('[data-auto-submit]').forEach((field) => {
     field.addEventListener('change', () => {
+      const cookieName = field.dataset.historyPageSizeCookie || '';
+      if (cookieName) {
+        document.cookie = `${cookieName}=${encodeURIComponent(field.value)}; Path=/; SameSite=Lax`;
+      }
       if (field.form) field.form.submit();
     });
   });

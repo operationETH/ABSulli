@@ -17,6 +17,7 @@ def test_templates_have_no_inline_event_handlers():
 def test_history_page_size_select_uses_auto_submit():
     partial = (TEMPLATES_DIR / "partials" / "history_page_size.html").read_text()
     assert "data-auto-submit" in partial
+    assert "data-history-page-size-cookie" in partial
     assert "onchange" not in partial
 
 

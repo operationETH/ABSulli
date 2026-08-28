@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 HISTORY_PAGE_SIZE_OPTIONS = (10, 25, 50, 100)
 HISTORY_PAGE_SIZE_SETTING = "history_page_size"
+HISTORY_PAGE_SIZE_COOKIE = "absulli_history_page_size"
 DEFAULT_HISTORY_PAGE_SIZE = 25
 
 SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "api", "about")
@@ -69,20 +70,22 @@ def history_page_size(request: Request) -> int:
     if requested is not None:
         size = clean_history_page_size(requested, default=0)
         if size in HISTORY_PAGE_SIZE_OPTIONS:
-            current = setup_state.get_setup_setting(HISTORY_PAGE_SIZE_SETTING, "")
-            if current != str(size):
-                setup_state.set_setup_setting(HISTORY_PAGE_SIZE_SETTING, str(size))
             return size
 
-    return clean_history_page_size(
+    saved = clean_history_page_size(
         setup_state.get_setup_setting(HISTORY_PAGE_SIZE_SETTING, str(DEFAULT_HISTORY_PAGE_SIZE)),
         default=DEFAULT_HISTORY_PAGE_SIZE,
+    )
+    return clean_history_page_size(
+        request.cookies.get(HISTORY_PAGE_SIZE_COOKIE, ""),
+        default=saved,
     )
 
 
 def history_page_size_context(limit: int) -> dict[str, object]:
     return {
         "history_page_size": limit,
+        "history_page_size_cookie": HISTORY_PAGE_SIZE_COOKIE,
         "history_page_size_options": HISTORY_PAGE_SIZE_OPTIONS,
     }
 
@@ -94,10 +97,6 @@ def clean_http_url(value: str, label: str) -> str:
     if not url.startswith(("http://", "https://")):
         raise ValueError(f"{label} must start with http:// or https://")
     return url
-
-
-def clean_gotify_url(value: str) -> str:
-    return clean_http_url(value, "Gotify URL")
 
 
 def clean_agent_value(value: str) -> str:

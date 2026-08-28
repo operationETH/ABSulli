@@ -51,15 +51,6 @@ def _cache_set(key: str, value: str) -> None:
         _setup_cache[key] = (value, expires_at)
 
 
-def _cache_invalidate(*keys: str) -> None:
-    with _setup_cache_lock:
-        if keys:
-            for key in keys:
-                _setup_cache.pop(key, None)
-        else:
-            _setup_cache.clear()
-
-
 def warm_setup_state_cache() -> None:
     """Ensure the setup settings table exists during startup, not during a request."""
     _ensure_settings_table()
