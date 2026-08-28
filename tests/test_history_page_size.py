@@ -74,14 +74,14 @@ def add_history_rows(db, count=60, *, username="admin", user_id="user-1", item_i
     db.commit()
 
 
-def test_history_limit_query_is_saved_and_makes_users_clickable(monkeypatch):
+def test_history_limit_query_is_request_local_and_makes_users_clickable(monkeypatch):
     client, db, store = make_client(monkeypatch)
     add_history_rows(db, count=60)
 
     response = client.get("/history?limit=50")
 
     assert response.status_code == 200
-    assert store["history_page_size"] == "50"
+    assert "history_page_size" not in store
     assert 'value="50" selected' in response.text
     assert 'href="/users/user-1"' in response.text
     assert "Book 059" in response.text
@@ -97,6 +97,22 @@ def test_saved_history_page_size_is_used_on_user_detail_without_query(monkeypatc
     response = client.get("/users/admin")
 
     assert response.status_code == 200
+    assert 'value="10" selected' in response.text
+    assert "Book 011" in response.text
+    assert "Book 002" in response.text
+    assert "Book 001" not in response.text
+
+
+def test_session_history_page_size_overrides_saved_preference(monkeypatch):
+    client, db, store = make_client(monkeypatch)
+    store["history_page_size"] = "100"
+    client.cookies.set("absulli_history_page_size", "10")
+    add_history_rows(db, count=12)
+
+    response = client.get("/users/admin")
+
+    assert response.status_code == 200
+    assert store["history_page_size"] == "100"
     assert 'value="10" selected' in response.text
     assert "Book 011" in response.text
     assert "Book 002" in response.text
