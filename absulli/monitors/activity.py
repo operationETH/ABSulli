@@ -7,7 +7,7 @@ from absulli.core.config import get_settings
 from absulli.database.models import ActivitySession, Library, MediaItem
 from absulli.http.abs_client import AudiobookshelfClient
 from absulli.http.normalizers import normalize_item_notification_context, normalize_online_payload, normalize_podcast_playback_context, utcnow
-from absulli.notifiers.manager import NotificationManager
+from absulli.notifiers.manager import NotificationManager, event_enabled
 from absulli.monitors.utils import friendly_names
 
 log = logging.getLogger(__name__)
@@ -77,6 +77,15 @@ class ActivityMonitor:
                 context[key] = value
         return context
 
+    async def _notification_context_for_event(
+        self,
+        event_type: str,
+        session: dict,
+    ) -> dict[str, object] | None:
+        if not event_enabled(event_type):
+            return None
+        return await self._notification_context(session)
+
     async def poll(self, db: Session) -> int:
         payload = await self.client.get_online_users()
         sessions = normalize_online_payload(payload)
@@ -120,7 +129,7 @@ class ActivityMonitor:
                     f"{session['username']} started listening",
                     session["title"],
                     library_id=session.get("library_id") or "",
-                    context=await self._notification_context(session),
+                    context=await self._notification_context_for_event("playback_start", session),
                 )
 
         stale_seconds = max(45, get_settings().effective_abs_poll_interval * 3)
@@ -140,14 +149,17 @@ class ActivityMonitor:
                 f"{row.username} stopped listening",
                 row.title,
                 library_id=row.library_id or "",
-                context=await self._notification_context({
-                    "abs_item_id": row.abs_item_id or "",
-                    "title": row.title or "",
-                    "author": row.author or "",
-                    "library_name": row.library_name or "",
-                    "username": row.username or "",
-                    "media_type": row.media_type or "",
-                }),
+                context=await self._notification_context_for_event(
+                    "playback_stop",
+                    {
+                        "abs_item_id": row.abs_item_id or "",
+                        "title": row.title or "",
+                        "author": row.author or "",
+                        "library_name": row.library_name or "",
+                        "username": row.username or "",
+                        "media_type": row.media_type or "",
+                    },
+                ),
             )
 
         db.commit()
