@@ -24,7 +24,7 @@ from absulli.notifiers.agents import (
     TelegramAgent,
     WebhookAgent,
 )
-from absulli.notifiers.manager import WEBHOOK_DEFAULT_PAYLOAD
+from absulli.notifiers.manager import WEBHOOK_DEFAULT_PAYLOAD, webhook_headers_from_values
 
 log = logging.getLogger(__name__)
 
@@ -957,16 +957,11 @@ def agent_from_values(agent_id: str, values: dict[str, str]):
     if agent_id == "pushbullet":
         return PushbulletAgent(values["pushbullet_token"])
     if agent_id == "webhook":
-        headers = {}
-        authorization = values.get("webhook_authorization_header", "").strip()
-        if authorization:
-            headers["Authorization"] = authorization
-        custom_headers_value = values.get("webhook_custom_headers_json", "")
-        custom_headers = json.loads(custom_headers_value) if custom_headers_value else {}
-        if isinstance(custom_headers, dict):
-            for key, value in custom_headers.items():
-                if str(key).lower() != "authorization" or not authorization:
-                    headers[str(key)] = str(value)
+        headers = webhook_headers_from_values(
+            authorization=values.get("webhook_authorization_header", ""),
+            custom_headers_json=values.get("webhook_custom_headers_json", ""),
+            legacy_headers_json=values.get("webhook_headers_json", ""),
+        )
         return WebhookAgent(values["webhook_url"], headers)
     if agent_id == "email":
         return EmailAgent(
