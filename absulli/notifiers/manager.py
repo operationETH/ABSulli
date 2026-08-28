@@ -233,6 +233,36 @@ def validate_webhook_headers(value: str) -> str:
             raise ValueError("Webhook header names and values must be strings")
     return json.dumps(parsed, separators=(",", ":"))
 
+
+def webhook_headers_from_values(
+    authorization: str = "",
+    custom_headers_json: str = "",
+    legacy_headers_json: str = "",
+) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for source in (legacy_headers_json, custom_headers_json):
+        try:
+            parsed = json.loads(source) if source else {}
+        except (TypeError, ValueError):
+            parsed = {}
+        if not isinstance(parsed, dict):
+            continue
+        for key, value in parsed.items():
+            name = str(key)
+            existing = next((item for item in headers if item.lower() == name.lower()), None)
+            if existing is not None:
+                headers.pop(existing)
+            headers[name] = str(value)
+
+    authorization = str(authorization or "").strip()
+    if authorization:
+        existing = next((item for item in headers if item.lower() == "authorization"), None)
+        if existing is not None:
+            headers.pop(existing)
+        headers["Authorization"] = authorization
+    return headers
+
+
 def clean_notification_error(value: object) -> str:
     error = str(value or "").strip()
     if not error:
@@ -326,11 +356,11 @@ class NotificationManager:
 
         webhook_url = self.settings.effective_setting("webhook_url")
         if webhook_url:
-            headers_value = setup_state.get_setup_setting("webhook_headers_json", "")
-            try:
-                webhook_headers = json.loads(headers_value) if headers_value else {}
-            except (TypeError, ValueError):
-                webhook_headers = {}
+            webhook_headers = webhook_headers_from_values(
+                authorization=setup_state.get_setup_setting("webhook_authorization_header", ""),
+                custom_headers_json=setup_state.get_setup_setting("webhook_custom_headers_json", ""),
+                legacy_headers_json=setup_state.get_setup_setting("webhook_headers_json", ""),
+            )
             agents.append(("webhook", WebhookAgent(webhook_url, webhook_headers)))
 
         email_smtp_host = self.settings.effective_setting("email_smtp_host")

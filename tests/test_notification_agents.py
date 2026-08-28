@@ -79,6 +79,42 @@ def test_notification_manager_builds_saved_agents(monkeypatch):
     ]
 
 
+def test_notification_manager_builds_saved_webhook_headers(monkeypatch):
+    values = {
+        "webhook_url": "https://example.com/webhook",
+        "webhook_authorization_header": "Bearer saved-token",
+        "webhook_custom_headers_json": '{"X-Source":"ABSulli"}',
+        "webhook_headers_json": "",
+    }
+    monkeypatch.setattr(setup_state, "get_setup_setting", lambda key, default="": values.get(key, default))
+
+    agents = NotificationManager(get_settings()).agents()
+
+    assert len(agents) == 1
+    assert isinstance(agents[0], WebhookAgent)
+    assert agents[0].headers == {
+        "X-Source": "ABSulli",
+        "Authorization": "Bearer saved-token",
+    }
+
+
+def test_notification_manager_keeps_legacy_webhook_headers(monkeypatch):
+    values = {
+        "webhook_url": "https://example.com/webhook",
+        "webhook_headers_json": '{"Authorization":"Bearer legacy-token","X-Legacy":"true"}',
+    }
+    monkeypatch.setattr(setup_state, "get_setup_setting", lambda key, default="": values.get(key, default))
+
+    agents = NotificationManager(get_settings()).agents()
+
+    assert len(agents) == 1
+    assert isinstance(agents[0], WebhookAgent)
+    assert agents[0].headers == {
+        "Authorization": "Bearer legacy-token",
+        "X-Legacy": "true",
+    }
+
+
 def test_notification_manager_env_values_win(monkeypatch):
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/env")
     monkeypatch.setattr(setup_state, "get_setup_setting", lambda key, default="": "https://discord.example/db" if key == "discord_webhook_url" else default)

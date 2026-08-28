@@ -14,12 +14,14 @@ class FakeClient:
         self.payload = payload
         self.items = items or {}
         self.calls = 0
+        self.item_calls = 0
 
     async def get_online_users(self):
         self.calls += 1
         return self.payload
 
     async def get_item(self, item_id, expanded=False):
+        self.item_calls += 1
         return self.items.get(item_id, {})
 
 
@@ -105,6 +107,43 @@ def test_poll_creates_active_session_enriches_from_db_and_notifies_start():
             "body": "Transfer of Power",
             "library_id": "lib-1",
         }
+    ]
+    db.close()
+
+
+def test_poll_skips_notification_metadata_when_events_are_disabled(monkeypatch):
+    db = make_db()
+    db.add(
+        ActivitySession(
+            session_key="stale-session",
+            abs_user_id="user-2",
+            username="Stopped User",
+            abs_item_id="item-2",
+            title="Stopped Book",
+            is_active=True,
+            last_seen_at=utcnow() - timedelta(seconds=90),
+        )
+    )
+    db.commit()
+
+    checked_events = []
+
+    def fake_event_enabled(event_type):
+        checked_events.append(event_type)
+        return False
+
+    monkeypatch.setattr("absulli.monitors.activity.event_enabled", fake_event_enabled)
+    client = FakeClient(online_payload(online_session()))
+    notifier = FakeNotifier()
+    monitor = ActivityMonitor(client, notifier)
+
+    asyncio.run(monitor.poll(db))
+
+    assert client.item_calls == 0
+    assert checked_events == ["playback_start", "playback_stop"]
+    assert [event["event_type"] for event in notifier.events] == [
+        "playback_start",
+        "playback_stop",
     ]
     db.close()
 
@@ -414,7 +453,8 @@ def test_poll_batches_existing_session_lookup_and_filters_stale_query():
     db.close()
 
 
-def test_playback_notification_context_uses_full_item_metadata():
+def test_playback_notification_context_uses_full_item_metadata(monkeypatch):
+    monkeypatch.setattr("absulli.monitors.activity.event_enabled", lambda event_type: event_type == "playback_start")
     db = make_db()
     db.add_all([
         AbsUser(abs_user_id="user-1", username="raw-username", display_name="admin"),
@@ -464,7 +504,8 @@ def test_playback_notification_context_uses_full_item_metadata():
     db.close()
 
 
-def test_podcast_playback_notification_context_uses_episode_metadata():
+def test_podcast_playback_notification_context_uses_episode_metadata(monkeypatch):
+    monkeypatch.setattr("absulli.monitors.activity.event_enabled", lambda event_type: event_type == "playback_start")
     db = make_db()
     db.add_all([
         AbsUser(abs_user_id="user-1", username="raw-username", display_name="admin"),
