@@ -171,7 +171,7 @@ function tickLiveProgress() {
 
 async function refreshStatus() {
   try {
-    const r = await fetch('/api/status', { cache: 'no-store' });
+    const r = await fetch('/api/v1/status', { cache: 'no-store' });
     if (!r.ok) return;
     const data = await r.json();
     document.title = `ABSulli · ${data.active_sessions} active`;
@@ -184,7 +184,7 @@ async function refreshLiveActivity() {
   if (!needsDashboard && !needsActivityPage) return;
 
   try {
-    const r = await fetch('/api/activity', { cache: 'no-store' });
+    const r = await fetch('/api/v1/activity', { cache: 'no-store' });
     if (!r.ok) return;
     liveActivityRows = await r.json();
     if (needsDashboard) renderDashboardActivity(liveActivityRows);
