@@ -122,6 +122,31 @@ def test_get_library_items_sends_expected_path_and_params(monkeypatch):
     ]
 
 
+def test_get_collections_sends_expected_path(monkeypatch):
+    calls = []
+
+    class FakeAsyncClient:
+        is_closed = False
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            return FakeResponse(payload={"collections": []})
+
+        async def aclose(self):
+            self.is_closed = True
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    client = AudiobookshelfClient(make_settings())
+    result = asyncio.run(client.get_collections())
+
+    assert result == {"collections": []}
+    assert calls == [("/api/collections", {"params": None})]
+
+
 def test_optional_get_returns_none_only_for_404(monkeypatch):
     statuses = [404, 500]
 

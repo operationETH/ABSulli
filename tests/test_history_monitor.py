@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from absulli.core.time import utcnow
-from absulli.database.models import AbsUser, Base, Library, ListeningHistory, MediaItem
+from absulli.database.models import AbsUser, Base, Library, ListeningHistory, MediaItem, Setting
 from absulli.monitors.history import HistoryMonitor
 
 
@@ -15,20 +15,25 @@ class FakeClient:
         *,
         users=None,
         libraries=None,
+        collections=None,
         library_items=None,
         items=None,
         sessions=None,
         fail_sessions_for=None,
+        fail_collections=False,
     ):
         self.users = users if users is not None else {"users": []}
         self.libraries = libraries if libraries is not None else {"libraries": []}
+        self.collections = collections if collections is not None else {"collections": []}
         self.library_items = library_items if library_items is not None else {}
         self.items = items if items is not None else {}
         self.sessions = sessions if sessions is not None else {}
         self.fail_sessions_for = set(fail_sessions_for or [])
+        self.fail_collections = fail_collections
         self.calls = {
             "get_users": 0,
             "get_libraries": 0,
+            "get_collections": 0,
             "get_library_items": [],
             "get_item": [],
             "get_user_listening_sessions": [],
@@ -41,6 +46,12 @@ class FakeClient:
     async def get_libraries(self):
         self.calls["get_libraries"] += 1
         return self.libraries
+
+    async def get_collections(self):
+        self.calls["get_collections"] += 1
+        if self.fail_collections:
+            raise RuntimeError("ABS collections unavailable")
+        return self.collections
 
     async def get_library_items(self, library_id, limit=5000):
         self.calls["get_library_items"].append((library_id, limit))
@@ -693,6 +704,339 @@ def test_new_book_notifications_start_after_silent_library_baseline():
         )
     ]
     assert notifier.contexts[0]["description"] == ""
+    db.close()
+
+
+def test_new_collection_notifications_start_after_silent_baseline():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    existing_collection = {
+        "id": "collection-1",
+        "libraryId": "lib-1",
+        "name": "Existing Collection",
+        "description": "Existing description",
+        "books": [{"id": "item-1"}],
+    }
+    client = FakeClient(collections={"collections": [existing_collection]})
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    first_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert first_detected == 0
+    assert notifier.calls == []
+    baseline = db.query(Setting).filter_by(key="notify_new_collection_baseline").one()
+    assert baseline.value == '["collection-1"]'
+    membership = db.query(Setting).filter_by(key="notify_collection_membership_baseline").one()
+    assert membership.value == '{"collection-1": ["item-1"]}'
+
+    new_collection = {
+        "id": "collection-2",
+        "libraryId": "lib-1",
+        "name": "Mitch Rapp",
+        "description": "<b>Reading order</b>",
+        "books": [{"id": "item-1"}, {"id": "item-2"}],
+    }
+    client.collections = {"collections": [existing_collection, new_collection]}
+
+    second_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert second_detected == 1
+    assert notifier.calls == [
+        (
+            "new_collection",
+            "New collection added",
+            "Mitch Rapp was added to Audiobooks.",
+            "lib-1",
+        )
+    ]
+    assert notifier.contexts == [
+        {
+            "collection_id": "collection-2",
+            "collection": "Mitch Rapp",
+            "collection_description": "Reading order",
+            "book_count": 2,
+            "library_name": "Audiobooks",
+            "media_type": "collection",
+        }
+    ]
+    db.close()
+
+
+def test_book_added_to_collection_notifies_after_silent_membership_baseline():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=2,
+    )
+    db.add(library)
+    db.commit()
+
+    first_book = media_item_row(id="item-1")
+    collection = {
+        "id": "collection-1",
+        "libraryId": "lib-1",
+        "name": "Mitch Rapp",
+        "description": "<b>Reading order</b>",
+        "books": [first_book],
+    }
+    client = FakeClient(collections={"collections": [collection]})
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    first_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert first_detected == 0
+    assert notifier.calls == []
+
+    second_book = media_item_row(
+        id="item-2",
+        media={
+            "metadata": {
+                "title": "American Assassin",
+                "authors": [{"id": "author-1", "name": "Vince Flynn"}],
+                "series": [{"name": "Mitch Rapp"}],
+                "description": "<p>The beginning.</p>",
+                "asin": "B002V5D2J6",
+            },
+            "duration": 4200,
+        },
+    )
+    collection["books"] = [first_book, second_book]
+
+    second_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert second_detected == 1
+    assert notifier.calls == [
+        (
+            "book_added_to_collection",
+            "Book added to collection",
+            "American Assassin by Vince Flynn was added to Mitch Rapp in Audiobooks.",
+            "lib-1",
+        )
+    ]
+    assert notifier.contexts == [
+        {
+            "item_id": "item-2",
+            "title": "American Assassin",
+            "author": "Vince Flynn",
+            "series": "Mitch Rapp",
+            "narrator": "",
+            "subtitle": "",
+            "publisher": "",
+            "description": "The beginning.",
+            "isbn": "",
+            "asin": "B002V5D2J6",
+            "language": "",
+            "year": "",
+            "collection_id": "collection-1",
+            "collection": "Mitch Rapp",
+            "collection_description": "Reading order",
+            "book_count": 2,
+            "library_name": "Audiobooks",
+            "media_type": "book",
+        }
+    ]
+    membership = db.query(Setting).filter_by(key="notify_collection_membership_baseline").one()
+    assert membership.value == '{"collection-1": ["item-1", "item-2"]}'
+    db.close()
+
+
+def test_existing_collections_get_silent_membership_baseline_after_upgrade():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="Audiobooks", media_type="book")
+    db.add_all(
+        [
+            library,
+            Setting(
+                key="notify_new_collection_baseline",
+                value='["collection-1"]',
+                updated_at=utcnow(),
+            ),
+        ]
+    )
+    db.commit()
+
+    collection = {
+        "id": "collection-1",
+        "libraryId": "lib-1",
+        "name": "Mitch Rapp",
+        "books": [media_item_row(id="item-1")],
+    }
+    client = FakeClient(collections={"collections": [collection]})
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    first_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert first_detected == 0
+    assert notifier.calls == []
+    membership = db.query(Setting).filter_by(key="notify_collection_membership_baseline").one()
+    assert membership.value == '{"collection-1": ["item-1"]}'
+
+    collection["books"].append(media_item_row(id="item-2"))
+
+    second_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert second_detected == 1
+    assert notifier.calls[0][0] == "book_added_to_collection"
+    assert notifier.contexts[0]["item_id"] == "item-2"
+    db.close()
+
+
+def test_book_removed_then_readded_to_collection_notifies_again():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="Audiobooks", media_type="book")
+    db.add(library)
+    db.commit()
+
+    book = media_item_row(id="item-1")
+    collection = {
+        "id": "collection-1",
+        "libraryId": "lib-1",
+        "name": "Favorites",
+        "books": [book],
+    }
+    client = FakeClient(collections={"collections": [collection]})
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_collections(db, [library]))
+    collection["books"] = []
+    removed_detected = asyncio.run(monitor.sync_collections(db, [library]))
+    collection["books"] = [book]
+    readded_detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert removed_detected == 0
+    assert readded_detected == 1
+    assert len(notifier.calls) == 1
+    assert notifier.calls[0][0] == "book_added_to_collection"
+    assert notifier.contexts[0]["item_id"] == "item-1"
+    db.close()
+
+
+def test_collection_book_ids_use_stored_media_metadata():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="Audiobooks", media_type="book")
+    db.add_all(
+        [
+            library,
+            MediaItem(
+                abs_item_id="item-2",
+                library_id="lib-1",
+                library_name="Audiobooks",
+                media_type="book",
+                title="American Assassin",
+                author="Vince Flynn",
+            ),
+            Setting(
+                key="notify_new_collection_baseline",
+                value='["collection-1"]',
+                updated_at=utcnow(),
+            ),
+            Setting(
+                key="notify_collection_membership_baseline",
+                value='{"collection-1": ["item-1"]}',
+                updated_at=utcnow(),
+            ),
+        ]
+    )
+    db.commit()
+
+    client = FakeClient(
+        collections={
+            "collections": [
+                {
+                    "id": "collection-1",
+                    "libraryId": "lib-1",
+                    "name": "Mitch Rapp",
+                    "books": ["item-1", "item-2"],
+                }
+            ]
+        }
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert detected == 1
+    assert notifier.calls == [
+        (
+            "book_added_to_collection",
+            "Book added to collection",
+            "American Assassin by Vince Flynn was added to Mitch Rapp in Audiobooks.",
+            "lib-1",
+        )
+    ]
+    assert notifier.contexts[0]["item_id"] == "item-2"
+    db.close()
+
+
+def test_collection_baseline_keeps_deleted_collection_ids():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="Audiobooks", media_type="book")
+    db.add_all(
+        [
+            library,
+            Setting(
+                key="notify_new_collection_baseline",
+                value='["collection-1", "collection-2"]',
+                updated_at=utcnow(),
+            ),
+        ]
+    )
+    db.commit()
+
+    client = FakeClient(
+        collections={
+            "collections": [
+                {
+                    "id": "collection-2",
+                    "libraryId": "lib-1",
+                    "name": "Still Present",
+                    "books": [],
+                }
+            ]
+        }
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    detected = asyncio.run(monitor.sync_collections(db, [library]))
+
+    assert detected == 0
+    assert notifier.calls == []
+    baseline = db.query(Setting).filter_by(key="notify_new_collection_baseline").one()
+    assert baseline.value == '["collection-1", "collection-2"]'
+    db.close()
+
+
+def test_collection_failure_does_not_stop_history_poll():
+    db = make_db()
+    client = FakeClient(
+        users=users_payload(user_row()),
+        libraries=libraries_payload(),
+        sessions={"user-1": sessions_payload(history_row())},
+        fail_collections=True,
+    )
+    monitor = HistoryMonitor(client)
+
+    imported = asyncio.run(monitor.poll(db))
+
+    assert imported == 1
+    assert db.query(ListeningHistory).count() == 1
+    assert client.calls["get_collections"] == 1
     db.close()
 
 

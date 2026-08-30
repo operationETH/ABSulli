@@ -369,12 +369,36 @@ def test_notification_events_use_agent_specific_names(monkeypatch):
             'notify_playback_stopped',
             'notify_abs_connection_failed',
             'notify_abs_connection_restored',
+            'notify_book_added_to_collection',
             'notify_new_book',
+            'notify_new_collection',
             'notify_new_podcast',
             'notify_new_podcast_episode',
         ]:
             assert response.text.count(f'name="{agent_id}_{setting}"') == 1
     assert response.text.count('Notification Events') == 9
+
+
+def test_notification_events_and_templates_use_display_order(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    expected = [
+        "Playback Started",
+        "Playback Stopped",
+        "New Book Added",
+        "New Collection Added",
+        "Book Added to Collection",
+        "New Podcast Added",
+        "New Podcast Episode Added",
+        "Audiobookshelf Connection Failed",
+        "Audiobookshelf Connection Restored",
+    ]
+
+    events = web_settings.notification_events_context("discord")
+    templates = web_settings.notification_templates_context("discord")
+
+    assert [event["label"] for event in events] == expected
+    assert [template["label"] for template in templates] == expected
 
 
 def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
@@ -397,7 +421,9 @@ def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
     assert store['discord_notify_playback_stopped'] == 'false'
     assert store['discord_notify_abs_connection_failed'] == 'false'
     assert store['discord_notify_abs_connection_restored'] == 'true'
+    assert store['discord_notify_book_added_to_collection'] == 'false'
     assert store['discord_notify_new_book'] == 'false'
+    assert store['discord_notify_new_collection'] == 'false'
     assert store['discord_notify_new_podcast'] == 'false'
     assert store['discord_notify_new_podcast_episode'] == 'false'
     assert 'gotify_notify_playback_started' not in store
@@ -430,7 +456,9 @@ def test_notification_events_default_to_unchecked(monkeypatch):
             'notify_playback_stopped',
             'notify_abs_connection_failed',
             'notify_abs_connection_restored',
+            'notify_book_added_to_collection',
             'notify_new_book',
+            'notify_new_collection',
             'notify_new_podcast',
             'notify_new_podcast_episode',
         ]:
@@ -452,7 +480,9 @@ def test_notification_manager_defaults_all_events_disabled(monkeypatch):
     assert event_enabled('playback_stop') is False
     assert event_enabled('abs_connection_failed') is False
     assert event_enabled('abs_connection_restored') is False
+    assert event_enabled('book_added_to_collection') is False
     assert event_enabled('new_book') is False
+    assert event_enabled('new_collection') is False
     assert event_enabled('new_podcast') is False
     assert event_enabled('new_podcast_episode') is False
 

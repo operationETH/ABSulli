@@ -116,22 +116,22 @@ NOTIFICATION_EVENT_SETTINGS = {
         "description": "Send when a user stops listening.",
         "default": False,
     },
-    "abs_connection_failed": {
-        "setting": "notify_abs_connection_failed",
-        "label": "Audiobookshelf Connection Failed",
-        "description": "Send when ABSulli cannot reach Audiobookshelf.",
-        "default": False,
-    },
-    "abs_connection_restored": {
-        "setting": "notify_abs_connection_restored",
-        "label": "Audiobookshelf Connection Restored",
-        "description": "Send when Audiobookshelf starts responding again.",
-        "default": False,
-    },
     "new_book": {
         "setting": "notify_new_book",
         "label": "New Book Added",
         "description": "Send when ABSulli detects a new book after the initial library scan.",
+        "default": False,
+    },
+    "new_collection": {
+        "setting": "notify_new_collection",
+        "label": "New Collection Added",
+        "description": "Send when ABSulli detects a new collection after the initial collection scan.",
+        "default": False,
+    },
+    "book_added_to_collection": {
+        "setting": "notify_book_added_to_collection",
+        "label": "Book Added to Collection",
+        "description": "Send when ABSulli detects a book added to an existing collection after the initial collection scan.",
         "default": False,
     },
     "new_podcast": {
@@ -146,6 +146,18 @@ NOTIFICATION_EVENT_SETTINGS = {
         "description": "Send when ABSulli detects a newly downloaded podcast episode after the initial episode scan.",
         "default": False,
     },
+    "abs_connection_failed": {
+        "setting": "notify_abs_connection_failed",
+        "label": "Audiobookshelf Connection Failed",
+        "description": "Send when ABSulli cannot reach Audiobookshelf.",
+        "default": False,
+    },
+    "abs_connection_restored": {
+        "setting": "notify_abs_connection_restored",
+        "label": "Audiobookshelf Connection Restored",
+        "description": "Send when Audiobookshelf starts responding again.",
+        "default": False,
+    },
 }
 
 NOTIFICATION_TEMPLATE_VARIABLE_GROUPS = [
@@ -153,6 +165,9 @@ NOTIFICATION_TEMPLATE_VARIABLE_GROUPS = [
         "label": "Media",
         "variables": [
             ("{author}", "Author"),
+            ("{book_count}", "Number of books in a collection"),
+            ("{collection}", "Collection name"),
+            ("{collection_description}", "Collection description"),
             ("{description}", "Short book or current media description"),
             ("{episode}", "Episode title"),
             ("{episode_description}", "Short episode description"),
@@ -179,6 +194,7 @@ NOTIFICATION_TEMPLATE_VARIABLE_GROUPS = [
             ("{isbn}", "ISBN"),
             ("{item_id}", "Audiobookshelf item ID"),
             ("{itunes_id}", "Apple Podcasts iTunes ID"),
+            ("{collection_id}", "Audiobookshelf collection ID"),
         ],
     },
     {

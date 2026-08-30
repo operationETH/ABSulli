@@ -45,6 +45,242 @@ class HistoryMonitor:
         else:
             db.add(Setting(key=key, value="true", updated_at=utcnow()))
 
+    def _collection_baseline(self, db: Session) -> set[str] | None:
+        row = db.query(Setting).filter(Setting.key == "notify_new_collection_baseline").first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "[]")
+        except (TypeError, ValueError):
+            return set()
+        if not isinstance(values, list):
+            return set()
+        return {str(value) for value in values if value}
+
+    def _store_collection_baseline(self, db: Session, collection_ids: set[str]) -> None:
+        key = "notify_new_collection_baseline"
+        value = json.dumps(sorted(collection_ids))
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _collection_membership_baseline(self, db: Session) -> dict[str, set[str]] | None:
+        row = db.query(Setting).filter(Setting.key == "notify_collection_membership_baseline").first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "{}")
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(values, dict):
+            return {}
+        return {
+            str(collection_id): {str(item_id) for item_id in item_ids if item_id}
+            for collection_id, item_ids in values.items()
+            if collection_id and isinstance(item_ids, list)
+        }
+
+    def _store_collection_membership_baseline(self, db: Session, membership: dict[str, set[str]]) -> None:
+        key = "notify_collection_membership_baseline"
+        value = json.dumps(
+            {
+                collection_id: sorted(item_ids)
+                for collection_id, item_ids in sorted(membership.items())
+            }
+        )
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _collection_books(self, db: Session, collection: dict) -> dict[str, dict]:
+        raw_books = collection.get("books")
+        raw_books = raw_books if isinstance(raw_books, list) else []
+        normalized = normalize_media_item_payload(
+            raw_books,
+            str(collection.get("library_id") or ""),
+            str(collection.get("library_name") or ""),
+        )
+        books = {str(book["abs_item_id"]): book for book in normalized if book.get("abs_item_id")}
+        item_ids = {
+            str(book.get("id") or book.get("libraryItemId") or "").strip()
+            if isinstance(book, dict)
+            else str(book or "").strip()
+            for book in raw_books
+        }
+        item_ids.discard("")
+        missing_ids = item_ids - books.keys()
+        if missing_ids:
+            stored_books = db.query(MediaItem).filter(MediaItem.abs_item_id.in_(missing_ids)).all()
+            for stored in stored_books:
+                books[stored.abs_item_id] = {
+                    "abs_item_id": stored.abs_item_id,
+                    "library_id": stored.library_id,
+                    "library_name": stored.library_name,
+                    "media_type": stored.media_type,
+                    "title": stored.title,
+                    "author": stored.author,
+                    "series": stored.series,
+                    "narrator": stored.narrator,
+                    "year": stored.year,
+                }
+        for item_id in missing_ids - books.keys():
+            books[item_id] = {
+                "abs_item_id": item_id,
+                "library_id": collection.get("library_id") or "",
+                "library_name": collection.get("library_name") or "",
+                "media_type": "book",
+                "title": "Unknown",
+                "author": "",
+            }
+        return books
+
+    async def _notify_new_collections(self, db: Session, collections: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for collection in collections:
+            name = str(collection.get("name") or "Unknown collection")
+            library_name = str(collection.get("library_name") or "Audiobookshelf")
+            body = f"{name} was added to {library_name}."
+            books = collection.get("books")
+            book_count = len(books) if isinstance(books, list) else 0
+            try:
+                await self.notifier.notify(
+                    db,
+                    "new_collection",
+                    "New collection added",
+                    body,
+                    library_id=str(collection.get("library_id") or ""),
+                    context={
+                        "collection_id": collection.get("collection_id") or "",
+                        "collection": name,
+                        "collection_description": _plain_text(collection.get("description") or ""),
+                        "book_count": book_count,
+                        "library_name": library_name,
+                        "media_type": "collection",
+                    },
+                )
+            except Exception as exc:
+                log.warning("New collection notification failed for %s: %s", name, exc)
+
+    async def _notify_books_added_to_collections(self, db: Session, additions: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for addition in additions:
+            book = addition["book"]
+            title = str(book.get("title") or "Unknown")
+            author = str(book.get("author") or "Unknown author")
+            collection_name = str(addition.get("collection") or "Unknown collection")
+            library_name = str(addition.get("library_name") or "Audiobookshelf")
+            body = f"{title} by {author} was added to {collection_name} in {library_name}."
+            try:
+                await self.notifier.notify(
+                    db,
+                    "book_added_to_collection",
+                    "Book added to collection",
+                    body,
+                    library_id=str(addition.get("library_id") or ""),
+                    context={
+                        "item_id": book.get("abs_item_id") or "",
+                        "title": title,
+                        "author": author,
+                        "series": book.get("series") or "",
+                        "narrator": book.get("narrator") or "",
+                        "subtitle": book.get("subtitle") or "",
+                        "publisher": book.get("publisher") or "",
+                        "description": _plain_text(book.get("description") or ""),
+                        "isbn": book.get("isbn") or "",
+                        "asin": book.get("asin") or "",
+                        "language": book.get("language") or "",
+                        "year": book.get("year") or "",
+                        "collection_id": addition.get("collection_id") or "",
+                        "collection": collection_name,
+                        "collection_description": _plain_text(addition.get("collection_description") or ""),
+                        "book_count": addition.get("book_count") or 0,
+                        "library_name": library_name,
+                        "media_type": book.get("media_type") or "book",
+                    },
+                )
+            except Exception as exc:
+                log.warning("Collection book notification failed for %s: %s", title, exc)
+
+    async def sync_collections(self, db: Session, libraries: list[Library]) -> int:
+        try:
+            payload = await self.client.get_collections()
+        except Exception as exc:
+            log.warning("Collection sync failed: %s", exc)
+            return 0
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("collections") or payload.get("results") or payload.get("items") or []
+        else:
+            rows = []
+
+        library_names = {library.abs_library_id: library.name for library in libraries}
+        collections = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            collection_id = str(row.get("id") or "").strip()
+            if not collection_id:
+                continue
+            library_id = str(row.get("libraryId") or row.get("library_id") or "").strip()
+            collection = dict(row)
+            collection["collection_id"] = collection_id
+            collection["library_id"] = library_id
+            collection["library_name"] = library_names.get(library_id, "Audiobookshelf")
+            collection["normalized_books"] = self._collection_books(db, collection)
+            collections.append(collection)
+
+        current_ids = {collection["collection_id"] for collection in collections}
+        current_membership = {
+            collection["collection_id"]: set(collection["normalized_books"])
+            for collection in collections
+        }
+        baseline = self._collection_baseline(db)
+        membership_baseline = self._collection_membership_baseline(db)
+        if baseline is None:
+            self._store_collection_baseline(db, current_ids)
+            self._store_collection_membership_baseline(db, current_membership)
+            db.commit()
+            return 0
+
+        new_collections = [collection for collection in collections if collection["collection_id"] not in baseline]
+        additions = []
+        if membership_baseline is not None:
+            for collection in collections:
+                collection_id = collection["collection_id"]
+                if collection_id not in baseline or collection_id not in membership_baseline:
+                    continue
+                new_item_ids = current_membership[collection_id] - membership_baseline[collection_id]
+                for item_id in sorted(new_item_ids):
+                    additions.append(
+                        {
+                            "book": collection["normalized_books"][item_id],
+                            "collection_id": collection_id,
+                            "collection": collection.get("name") or "Unknown collection",
+                            "collection_description": collection.get("description") or "",
+                            "book_count": len(current_membership[collection_id]),
+                            "library_id": collection.get("library_id") or "",
+                            "library_name": collection.get("library_name") or "Audiobookshelf",
+                        }
+                    )
+
+        stored_membership = dict(membership_baseline or {})
+        stored_membership.update(current_membership)
+        self._store_collection_baseline(db, baseline | current_ids)
+        self._store_collection_membership_baseline(db, stored_membership)
+        db.commit()
+        await self._notify_new_collections(db, new_collections)
+        await self._notify_books_added_to_collections(db, additions)
+        return len(new_collections) + len(additions)
+
     async def _notify_new_books(self, db: Session, books: list[dict]) -> None:
         if not self.notifier:
             return
@@ -594,6 +830,7 @@ class HistoryMonitor:
         users = await self.sync_users(db)
         libraries = await self.sync_libraries(db)
         await self.sync_recent_items(db, libraries)
+        await self.sync_collections(db, libraries)
         usernames = friendly_names(db)
         library_map = self._libraries_by_abs_id(db)
 
