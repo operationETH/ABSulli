@@ -16,24 +16,29 @@ class FakeClient:
         users=None,
         libraries=None,
         collections=None,
+        series=None,
         library_items=None,
         items=None,
         sessions=None,
         fail_sessions_for=None,
         fail_collections=False,
+        fail_series_for=None,
     ):
         self.users = users if users is not None else {"users": []}
         self.libraries = libraries if libraries is not None else {"libraries": []}
         self.collections = collections if collections is not None else {"collections": []}
+        self.series = series if series is not None else {}
         self.library_items = library_items if library_items is not None else {}
         self.items = items if items is not None else {}
         self.sessions = sessions if sessions is not None else {}
         self.fail_sessions_for = set(fail_sessions_for or [])
         self.fail_collections = fail_collections
+        self.fail_series_for = set(fail_series_for or [])
         self.calls = {
             "get_users": 0,
             "get_libraries": 0,
             "get_collections": 0,
+            "get_library_series": [],
             "get_library_items": [],
             "get_item": [],
             "get_user_listening_sessions": [],
@@ -52,6 +57,15 @@ class FakeClient:
         if self.fail_collections:
             raise RuntimeError("ABS collections unavailable")
         return self.collections
+
+    async def get_library_series(self, library_id, limit=1000, page=0):
+        self.calls["get_library_series"].append((library_id, limit, page))
+        if library_id in self.fail_series_for:
+            raise RuntimeError("ABS series unavailable")
+        library_series = self.series.get(library_id, {"results": [], "total": 0})
+        if isinstance(library_series, dict) and page in library_series:
+            return library_series[page]
+        return library_series
 
     async def get_library_items(self, library_id, limit=5000):
         self.calls["get_library_items"].append((library_id, limit))
@@ -93,6 +107,25 @@ def items_payload(*rows, total=None):
     return payload
 
 
+def series_payload(*rows, total=None, limit=None, page=None):
+    payload = {"results": list(rows)}
+    if total is not None:
+        payload["total"] = total
+    if limit is not None:
+        payload["limit"] = limit
+    if page is not None:
+        payload["page"] = page
+    return payload
+
+
+def series_row(series_id="series-1", name="Mitch Rapp", books=None):
+    return {
+        "id": series_id,
+        "name": name,
+        "books": list(books if books is not None else [{"id": "item-1"}]),
+    }
+
+
 def sessions_payload(*rows):
     return {"sessions": list(rows)}
 
@@ -130,7 +163,7 @@ def media_item_row(**overrides):
                 "title": "Transfer of Power",
                 "authors": [{"id": "author-1", "name": "Vince Flynn"}],
                 "narratorName": "Nick Sullivan",
-                "series": [{"name": "Mitch Rapp"}],
+                "seriesName": "Mitch Rapp",
                 "publishedYear": "1999",
             },
             "duration": 3600,
@@ -707,6 +740,589 @@ def test_new_book_notifications_start_after_silent_library_baseline():
     db.close()
 
 
+def test_new_series_notifications_start_after_silent_library_baseline():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    first_book = media_item_row()
+    client = FakeClient(
+        library_items={"lib-1": items_payload(first_book, total=1)},
+        series={"lib-1": series_payload(series_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    baseline_key = monitor._new_series_baseline_key("lib-1")
+    assert db.query(Setting).filter_by(key=baseline_key).first() is None
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    baseline = db.query(Setting).filter_by(key=baseline_key).one()
+    assert baseline.value == '["id:series-1"]'
+
+    second_book = media_item_row(
+        id="item-2",
+        media={
+            "metadata": {
+                "title": "The Bourne Identity",
+                "authors": [{"id": "author-2", "name": "Robert Ludlum"}],
+                "seriesName": "Jason Bourne",
+            },
+            "duration": 3600,
+        },
+    )
+    client.library_items["lib-1"] = items_payload(first_book, second_book, total=2)
+    client.series["lib-1"] = series_payload(
+        series_row(),
+        series_row("series-2", "Jason Bourne", [{"id": "item-2"}]),
+        total=2,
+    )
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == [
+        (
+            "new_book",
+            "New book added",
+            "The Bourne Identity by Robert Ludlum was added to Audiobooks.",
+            "lib-1",
+        ),
+        (
+            "new_series",
+            "New series added",
+            "Jason Bourne was added to Audiobooks.",
+            "lib-1",
+        ),
+    ]
+    assert notifier.contexts[1]["series"] == "Jason Bourne"
+    assert notifier.contexts[1]["item_id"] == "item-2"
+    assert notifier.contexts[1]["book_count"] == 1
+    db.close()
+
+
+def test_new_series_notification_detects_series_added_to_existing_book():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    book = media_item_row(
+        media={
+            "metadata": {
+                "title": "The Bourne Identity",
+                "authors": [{"id": "author-2", "name": "Robert Ludlum"}],
+            },
+            "duration": 3600,
+        },
+    )
+    client = FakeClient(
+        library_items={"lib-1": items_payload(book, total=1)},
+        series={"lib-1": series_payload(total=0)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+    book["media"]["metadata"]["seriesName"] = "Jason Bourne"
+    client.series["lib-1"] = series_payload(
+        series_row("series-2", "Jason Bourne", [{"id": "item-1"}]),
+        total=1,
+    )
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == [
+        (
+            "new_series",
+            "New series added",
+            "Jason Bourne was added to Audiobooks.",
+            "lib-1",
+        )
+    ]
+    assert db.query(MediaItem).filter_by(abs_item_id="item-1").one().series == "Jason Bourne"
+    db.close()
+
+
+def test_new_series_notification_deduplicates_series_names():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=0,
+    )
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(
+        library_items={"lib-1": items_payload(total=0)},
+        series={"lib-1": series_payload(total=0)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    first_book = media_item_row()
+    second_book = media_item_row(id="item-2")
+    client.library_items["lib-1"] = items_payload(first_book, second_book, total=2)
+    client.series["lib-1"] = series_payload(
+        series_row(books=[{"id": "item-1"}, {"id": "item-2"}]),
+        total=1,
+    )
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert [call[0] for call in notifier.calls].count("new_series") == 1
+    db.close()
+
+
+def test_book_added_to_series_notifies_after_silent_membership_baseline():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    first_book = media_item_row()
+    client = FakeClient(
+        library_items={"lib-1": items_payload(first_book, total=1)},
+        series={"lib-1": series_payload(series_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    membership_key = monitor._series_membership_baseline_key("lib-1")
+    membership = db.query(Setting).filter_by(key=membership_key).one()
+    assert membership.value == '{"id:series-1": ["item-1"]}'
+
+    second_book = media_item_row(
+        id="item-2",
+        media={
+            "metadata": {
+                "title": "American Assassin",
+                "authors": [{"id": "author-1", "name": "Vince Flynn"}],
+                "seriesName": "Mitch Rapp",
+            },
+            "duration": 4200,
+        },
+    )
+    client.library_items["lib-1"] = items_payload(first_book, second_book, total=2)
+    client.series["lib-1"] = series_payload(
+        series_row(books=[{"id": "item-1"}, {"id": "item-2"}]),
+        total=1,
+    )
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == [
+        (
+            "new_book",
+            "New book added",
+            "American Assassin by Vince Flynn was added to Audiobooks.",
+            "lib-1",
+        ),
+        (
+            "book_added_to_series",
+            "Book added to series",
+            "American Assassin by Vince Flynn was added to Mitch Rapp in Audiobooks.",
+            "lib-1",
+        ),
+    ]
+    assert notifier.contexts[1]["series"] == "Mitch Rapp"
+    assert notifier.contexts[1]["item_id"] == "item-2"
+    assert notifier.contexts[1]["book_count"] == 2
+    db.close()
+
+
+def test_existing_series_gets_silent_membership_baseline_after_upgrade():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(
+        library_items={"lib-1": items_payload(media_item_row(), total=1)},
+        series={"lib-1": series_payload(series_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+    db.add(
+        Setting(
+            key=monitor._new_series_baseline_key("lib-1"),
+            value='["mitch rapp"]',
+        )
+    )
+    db.commit()
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    membership_key = monitor._series_membership_baseline_key("lib-1")
+    membership = db.query(Setting).filter_by(key=membership_key).one()
+    assert membership.value == '{"id:series-1": ["item-1"]}'
+    baseline_key = monitor._new_series_baseline_key("lib-1")
+    baseline = db.query(Setting).filter_by(key=baseline_key).one()
+    assert baseline.value == '["id:series-1"]'
+    db.close()
+
+
+def test_legacy_empty_series_baselines_are_ignored_on_endpoint_upgrade():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=2,
+    )
+    db.add_all(
+        [
+            library,
+            Setting(
+                key="notify_new_series_baseline_b8cc5e5f9fb66a2df366a336",
+                value="[]",
+            ),
+            Setting(
+                key="notify_series_membership_baseline_b8cc5e5f9fb66a2df366a336",
+                value="{}",
+            ),
+        ]
+    )
+    db.commit()
+
+    client = FakeClient(
+        series={
+            "lib-1": series_payload(
+                series_row(),
+                series_row("series-2", "Jason Bourne", [{"id": "item-2"}]),
+                total=2,
+            )
+        }
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    detected = asyncio.run(monitor.sync_series(db, [library]))
+
+    assert detected == 0
+    assert notifier.calls == []
+    assert monitor._new_series_baseline(db, "lib-1") == {
+        "id:series-1",
+        "id:series-2",
+    }
+    assert monitor._series_membership_baseline(db, "lib-1") == {
+        "id:series-1": {"item-1"},
+        "id:series-2": {"item-2"},
+    }
+    db.close()
+
+
+def test_existing_name_membership_baseline_migrates_to_series_id():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(
+        library_items={"lib-1": items_payload(media_item_row(), total=1)},
+        series={"lib-1": series_payload(series_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+    db.add_all(
+        [
+            Setting(
+                key=monitor._new_series_baseline_key("lib-1"),
+                value='["mitch rapp"]',
+            ),
+            Setting(
+                key=monitor._series_membership_baseline_key("lib-1"),
+                value='{"mitch rapp": ["item-1"]}',
+            ),
+        ]
+    )
+    db.commit()
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    assert monitor._new_series_baseline(db, "lib-1") == {"id:series-1"}
+    assert monitor._series_membership_baseline(db, "lib-1") == {
+        "id:series-1": {"item-1"}
+    }
+    db.close()
+
+
+def test_series_rename_with_stable_id_does_not_notify():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    book = media_item_row()
+    client = FakeClient(
+        library_items={"lib-1": items_payload(book, total=1)},
+        series={"lib-1": series_payload(series_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+    book["media"]["metadata"]["seriesName"] = "Mitch Rapp Universe"
+    client.series["lib-1"] = series_payload(
+        series_row("series-1", "Mitch Rapp Universe"),
+        total=1,
+    )
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    assert monitor._new_series_baseline(db, "lib-1") == {"id:series-1"}
+    db.close()
+
+
+def test_series_name_fallback_is_used_without_series_id():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    book = media_item_row()
+    client = FakeClient(
+        library_items={"lib-1": items_payload(book, total=1)},
+        series={"lib-1": series_payload(series_row("", "Mitch Rapp"), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    assert monitor._new_series_baseline(db, "lib-1") == {"name:mitch rapp"}
+    assert monitor._series_membership_baseline(db, "lib-1") == {
+        "name:mitch rapp": {"item-1"}
+    }
+    db.close()
+
+
+def test_series_name_fallback_migrates_when_id_appears():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=1,
+    )
+    db.add(library)
+    db.commit()
+
+    book = media_item_row()
+    client = FakeClient(
+        library_items={"lib-1": items_payload(book, total=1)},
+        series={"lib-1": series_payload(series_row("", "Mitch Rapp"), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+    client.series["lib-1"] = series_payload(series_row(), total=1)
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == []
+    assert monitor._new_series_baseline(db, "lib-1") == {"id:series-1"}
+    assert monitor._series_membership_baseline(db, "lib-1") == {
+        "id:series-1": {"item-1"}
+    }
+    db.close()
+
+
+def test_book_added_to_series_detects_metadata_added_to_existing_book():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=2,
+    )
+    db.add(library)
+    db.commit()
+
+    first_book = media_item_row()
+    second_book = media_item_row(
+        id="item-2",
+        media={
+            "metadata": {
+                "title": "American Assassin",
+                "authors": [{"id": "author-1", "name": "Vince Flynn"}],
+            },
+            "duration": 4200,
+        },
+    )
+    client = FakeClient(
+        library_items={"lib-1": items_payload(first_book, second_book, total=2)},
+        series={"lib-1": series_payload(series_row(), total=1)},
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+    second_book["media"]["metadata"]["seriesName"] = "Mitch Rapp"
+    client.series["lib-1"] = series_payload(
+        series_row(books=[{"id": "item-1"}, {"id": "item-2"}]),
+        total=1,
+    )
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert notifier.calls == [
+        (
+            "book_added_to_series",
+            "Book added to series",
+            "American Assassin by Vince Flynn was added to Mitch Rapp in Audiobooks.",
+            "lib-1",
+        )
+    ]
+    assert notifier.contexts[0]["book_count"] == 2
+    db.close()
+
+
+def test_book_removed_then_readded_to_series_notifies_again():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=2,
+    )
+    db.add(library)
+    db.commit()
+
+    first_book = media_item_row()
+    second_book = media_item_row(id="item-2")
+    client = FakeClient(
+        library_items={"lib-1": items_payload(first_book, second_book, total=2)},
+        series={
+            "lib-1": series_payload(
+                series_row(books=[{"id": "item-1"}, {"id": "item-2"}]),
+                total=1,
+            )
+        },
+    )
+    notifier = FakeNotifier()
+    monitor = HistoryMonitor(client, notifier)
+
+    asyncio.run(monitor.sync_recent_items(db, [library]))
+    asyncio.run(monitor.sync_series(db, [library]))
+    client.series["lib-1"] = series_payload(
+        series_row(books=[{"id": "item-1"}]),
+        total=1,
+    )
+    asyncio.run(monitor.sync_series(db, [library]))
+    client.series["lib-1"] = series_payload(
+        series_row(books=[{"id": "item-1"}, {"id": "item-2"}]),
+        total=1,
+    )
+    asyncio.run(monitor.sync_series(db, [library]))
+
+    assert [call[0] for call in notifier.calls] == ["book_added_to_series"]
+    db.close()
+
+
+def test_series_sync_loads_all_endpoint_pages():
+    db = make_db()
+    library = Library(
+        abs_library_id="lib-1",
+        name="Audiobooks",
+        media_type="book",
+        item_count=2,
+    )
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(
+        series={
+            "lib-1": {
+                0: series_payload(
+                    series_row(),
+                    total=2,
+                    limit=1,
+                    page=0,
+                ),
+                1: series_payload(
+                    series_row("series-2", "Jason Bourne", [{"id": "item-2"}]),
+                    total=2,
+                    limit=1,
+                    page=1,
+                ),
+            }
+        }
+    )
+    monitor = HistoryMonitor(client)
+
+    detected = asyncio.run(monitor.sync_series(db, [library]))
+
+    assert detected == 0
+    assert client.calls["get_library_series"] == [
+        ("lib-1", 1000, 0),
+        ("lib-1", 1000, 1),
+    ]
+    assert monitor._new_series_baseline(db, "lib-1") == {
+        "id:series-1",
+        "id:series-2",
+    }
+    db.close()
+
+
 def test_new_collection_notifications_start_after_silent_baseline():
     db = make_db()
     library = Library(
@@ -1037,6 +1653,25 @@ def test_collection_failure_does_not_stop_history_poll():
     assert imported == 1
     assert db.query(ListeningHistory).count() == 1
     assert client.calls["get_collections"] == 1
+    db.close()
+
+
+def test_series_failure_does_not_stop_history_poll():
+    db = make_db()
+    client = FakeClient(
+        users=users_payload(user_row()),
+        libraries=libraries_payload(library_row()),
+        library_items={"lib-1": items_payload(media_item_row(), total=1)},
+        sessions={"user-1": sessions_payload(history_row())},
+        fail_series_for={"lib-1"},
+    )
+    monitor = HistoryMonitor(client)
+
+    imported = asyncio.run(monitor.poll(db))
+
+    assert imported == 1
+    assert db.query(ListeningHistory).count() == 1
+    assert client.calls["get_library_series"] == [("lib-1", 1000, 0)]
     db.close()
 
 

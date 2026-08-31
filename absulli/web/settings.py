@@ -122,6 +122,18 @@ NOTIFICATION_EVENT_SETTINGS = {
         "description": "Send when ABSulli detects a new book after the initial library scan.",
         "default": False,
     },
+    "new_series": {
+        "setting": "notify_new_series",
+        "label": "New Series Added",
+        "description": "Send when ABSulli detects a new series after the initial library scan.",
+        "default": False,
+    },
+    "book_added_to_series": {
+        "setting": "notify_book_added_to_series",
+        "label": "Book Added to Series",
+        "description": "Send when ABSulli detects a book added to an existing series after the initial library scan.",
+        "default": False,
+    },
     "new_collection": {
         "setting": "notify_new_collection",
         "label": "New Collection Added",
@@ -165,7 +177,7 @@ NOTIFICATION_TEMPLATE_VARIABLE_GROUPS = [
         "label": "Media",
         "variables": [
             ("{author}", "Author"),
-            ("{book_count}", "Number of books in a collection"),
+            ("{book_count}", "Number of books in a collection or series"),
             ("{collection}", "Collection name"),
             ("{collection_description}", "Collection description"),
             ("{description}", "Short book or current media description"),

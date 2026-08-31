@@ -20,10 +20,12 @@ NOTIFICATION_EVENT_DEFAULTS = {
     "abs_connection_failed": False,
     "abs_connection_restored": False,
     "book_added_to_collection": False,
+    "book_added_to_series": False,
     "new_book": False,
     "new_collection": False,
     "new_podcast": False,
     "new_podcast_episode": False,
+    "new_series": False,
 }
 
 NOTIFICATION_EVENT_SETTINGS = {
@@ -32,20 +34,24 @@ NOTIFICATION_EVENT_SETTINGS = {
     "abs_connection_failed": "notify_abs_connection_failed",
     "abs_connection_restored": "notify_abs_connection_restored",
     "book_added_to_collection": "notify_book_added_to_collection",
+    "book_added_to_series": "notify_book_added_to_series",
     "new_book": "notify_new_book",
     "new_collection": "notify_new_collection",
     "new_podcast": "notify_new_podcast",
     "new_podcast_episode": "notify_new_podcast_episode",
+    "new_series": "notify_new_series",
 }
 
 LIBRARY_SCOPED_EVENT_TYPES = {
     "playback_start",
     "playback_stop",
     "book_added_to_collection",
+    "book_added_to_series",
     "new_book",
     "new_collection",
     "new_podcast",
     "new_podcast_episode",
+    "new_series",
 }
 
 NOTIFICATION_TEMPLATE_VARIABLES = {

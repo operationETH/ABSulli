@@ -370,10 +370,12 @@ def test_notification_events_use_agent_specific_names(monkeypatch):
             'notify_abs_connection_failed',
             'notify_abs_connection_restored',
             'notify_book_added_to_collection',
+            'notify_book_added_to_series',
             'notify_new_book',
             'notify_new_collection',
             'notify_new_podcast',
             'notify_new_podcast_episode',
+            'notify_new_series',
         ]:
             assert response.text.count(f'name="{agent_id}_{setting}"') == 1
     assert response.text.count('Notification Events') == 9
@@ -386,6 +388,8 @@ def test_notification_events_and_templates_use_display_order(monkeypatch):
         "Playback Started",
         "Playback Stopped",
         "New Book Added",
+        "New Series Added",
+        "Book Added to Series",
         "New Collection Added",
         "Book Added to Collection",
         "New Podcast Added",
@@ -422,10 +426,12 @@ def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
     assert store['discord_notify_abs_connection_failed'] == 'false'
     assert store['discord_notify_abs_connection_restored'] == 'true'
     assert store['discord_notify_book_added_to_collection'] == 'false'
+    assert store['discord_notify_book_added_to_series'] == 'false'
     assert store['discord_notify_new_book'] == 'false'
     assert store['discord_notify_new_collection'] == 'false'
     assert store['discord_notify_new_podcast'] == 'false'
     assert store['discord_notify_new_podcast_episode'] == 'false'
+    assert store['discord_notify_new_series'] == 'false'
     assert 'gotify_notify_playback_started' not in store
     assert 'notify_playback_started' not in store
 
@@ -457,10 +463,12 @@ def test_notification_events_default_to_unchecked(monkeypatch):
             'notify_abs_connection_failed',
             'notify_abs_connection_restored',
             'notify_book_added_to_collection',
+            'notify_book_added_to_series',
             'notify_new_book',
             'notify_new_collection',
             'notify_new_podcast',
             'notify_new_podcast_episode',
+            'notify_new_series',
         ]:
             marker = f'name="{agent_id}_{setting}"'
             start = response.text.index(marker)
@@ -481,10 +489,12 @@ def test_notification_manager_defaults_all_events_disabled(monkeypatch):
     assert event_enabled('abs_connection_failed') is False
     assert event_enabled('abs_connection_restored') is False
     assert event_enabled('book_added_to_collection') is False
+    assert event_enabled('book_added_to_series') is False
     assert event_enabled('new_book') is False
     assert event_enabled('new_collection') is False
     assert event_enabled('new_podcast') is False
     assert event_enabled('new_podcast_episode') is False
+    assert event_enabled('new_series') is False
 
 
 def test_notification_manager_supports_agent_specific_events(monkeypatch):
@@ -1068,6 +1078,7 @@ def test_notification_settings_page_shows_template_variables(monkeypatch):
     assert "{audible_url}" not in form_html
     assert "{itunes_id}" in response.text
     assert "{apple_podcasts_url}" in response.text
+    assert "Number of books in a collection or series" in response.text
     assert 'name="gotify_new_book_title_template"' in response.text
     assert 'name="gotify_new_book_body_template"' in response.text
 
