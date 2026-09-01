@@ -45,4 +45,4 @@ print(json.dumps({"before": before, "after": after, "revision": revision}))
     assert payload["before"] == []
     assert "settings" in payload["after"]
     assert "alembic_version" in payload["after"]
-    assert payload["revision"] == "0004_add_notification_deliveries"
+    assert payload["revision"] == "0005_add_library_archive_state"

@@ -906,6 +906,24 @@ function initializeNotificationAgentTabs(root = document) {
 
 initializeNotificationAgentTabs();
 
+document.addEventListener('click', (event) => {
+  const openButton = event.target.closest('[data-library-manage-open]');
+  if (openButton) {
+    const dialog = document.getElementById(openButton.dataset.libraryManageOpen || '');
+    if (dialog?.showModal) dialog.showModal();
+    return;
+  }
+
+  const closeButton = event.target.closest('[data-library-manage-close]');
+  if (closeButton) closeButton.closest('[data-library-manage-dialog]')?.close();
+});
+
+document.querySelectorAll('[data-library-manage-dialog]').forEach((dialog) => {
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+});
+
 async function copyTextToClipboard(value) {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(value);
@@ -928,6 +946,11 @@ async function copyTextToClipboard(value) {
 document.addEventListener('submit', (event) => {
   const form = event.target.closest('[data-notification-clear]');
   if (form && !window.confirm('Clear all notification log entries? This cannot be undone.')) {
+    event.preventDefault();
+    return;
+  }
+  const libraryForm = event.target.closest('[data-library-remove-cache]');
+  if (libraryForm && !window.confirm('Remove this archived library and its cached items? Listening history will be kept.')) {
     event.preventDefault();
   }
 });

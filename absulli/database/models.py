@@ -37,6 +37,8 @@ class Library(Base):
     media_type: Mapped[str] = mapped_column(String(64), default="unknown")
     item_count: Mapped[int] = mapped_column(Integer, default=0)
     display_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

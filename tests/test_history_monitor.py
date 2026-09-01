@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from absulli.core.time import utcnow
 from absulli.database.models import AbsUser, Base, Library, ListeningHistory, MediaItem, Setting
-from absulli.monitors.history import HistoryMonitor
+from absulli.monitors.history import HistoryMonitor, history_session_hash
 
 
 class FakeClient:
@@ -274,6 +274,84 @@ def test_poll_updates_existing_history_row_without_incrementing_import_count():
     assert rows[0].title == "Updated Title"
     assert rows[0].duration_seconds == 240
     assert rows[0].progress == 50
+    db.close()
+
+
+def test_poll_preserves_archived_library_on_existing_history_without_cached_item():
+    db = make_db()
+    db.add_all(
+        [
+            Library(
+                abs_library_id="lib-youtube",
+                name="YouTube Podcasts",
+                media_type="book",
+                item_count=0,
+                is_active=False,
+                archived_at=utcnow(),
+            ),
+            ListeningHistory(
+                abs_session_id="session-1",
+                abs_user_id="user-1",
+                username="Old User",
+                abs_item_id="item-1",
+                title="Old Title",
+                media_type="book",
+                library_id="lib-youtube",
+                library_name="YouTube Podcasts",
+            ),
+        ]
+    )
+    db.commit()
+
+    client = FakeClient(
+        users=users_payload(user_row()),
+        libraries=libraries_payload(),
+        sessions={"user-1": sessions_payload(history_row(displayTitle="Updated Title"))},
+    )
+    monitor = HistoryMonitor(client)
+
+    imported = asyncio.run(monitor.poll(db))
+
+    history = db.query(ListeningHistory).filter_by(abs_session_id="session-1").one()
+    assert imported == 0
+    assert db.query(MediaItem).count() == 0
+    assert history.title == "Updated Title"
+    assert history.library_id == "lib-youtube"
+    assert history.library_name == "YouTube Podcasts"
+    db.close()
+
+
+def test_poll_skips_and_removes_permanently_deleted_history_sessions():
+    db = make_db()
+    db.add_all(
+        [
+            ListeningHistory(
+                abs_session_id="session-1",
+                abs_user_id="user-1",
+                username="Old User",
+                abs_item_id="item-1",
+                title="Deleted Title",
+            ),
+            Setting(
+                key="deleted_history_session_hashes",
+                value=f'["{history_session_hash("session-1")}"]',
+                updated_at=utcnow(),
+            ),
+        ]
+    )
+    db.commit()
+
+    client = FakeClient(
+        users=users_payload(user_row()),
+        libraries=libraries_payload(),
+        sessions={"user-1": sessions_payload(history_row())},
+    )
+    monitor = HistoryMonitor(client)
+
+    imported = asyncio.run(monitor.poll(db))
+
+    assert imported == 0
+    assert db.query(ListeningHistory).count() == 0
     db.close()
 
 
@@ -554,9 +632,59 @@ def test_sync_libraries_batches_existing_library_lookup():
     select_statements = [statement for statement in statements if statement.lstrip().startswith("select")]
     assert len(saved) == 2
     assert len(select_statements) == 1
-    assert " in " in select_statements[0]
     assert db.query(Library).filter_by(abs_library_id="lib-1").one().name == "Updated Library"
     assert db.query(Library).filter_by(abs_library_id="lib-2").one().media_type == "podcast"
+    db.close()
+
+
+def test_sync_libraries_archives_missing_library_and_reactivates_it():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="YouTube Podcasts", media_type="book")
+    db.add(library)
+    db.commit()
+
+    client = FakeClient(libraries=libraries_payload())
+    monitor = HistoryMonitor(client)
+
+    saved = asyncio.run(monitor.sync_libraries(db))
+
+    db.refresh(library)
+    assert saved == []
+    assert library.is_active is False
+    assert library.archived_at is not None
+    last_seen_at = library.updated_at
+
+    client.libraries = libraries_payload(
+        library_row(id="lib-1", name="YouTube Podcasts", numItems=53)
+    )
+    restored = asyncio.run(monitor.sync_libraries(db))
+
+    db.refresh(library)
+    assert restored == [library]
+    assert library.is_active is True
+    assert library.archived_at is None
+    assert library.updated_at >= last_seen_at
+    db.close()
+
+
+def test_sync_libraries_does_not_archive_on_failure_or_invalid_payload():
+    db = make_db()
+    library = Library(abs_library_id="lib-1", name="Audiobooks", media_type="book")
+    db.add(library)
+    db.commit()
+
+    class FailingClient(FakeClient):
+        async def get_libraries(self):
+            raise RuntimeError("ABS unavailable")
+
+    assert asyncio.run(HistoryMonitor(FailingClient()).sync_libraries(db)) == []
+    db.refresh(library)
+    assert library.is_active is True
+
+    client = FakeClient(libraries={"unexpected": []})
+    assert asyncio.run(HistoryMonitor(client).sync_libraries(db)) == []
+    db.refresh(library)
+    assert library.is_active is True
     db.close()
 
 

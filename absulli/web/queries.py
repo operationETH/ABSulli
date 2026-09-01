@@ -235,10 +235,14 @@ def build_home_cards(db: Session, metric: str = "count", days: int = 30):
     recent_items = top_rows(recent_titles, date_value, include_item_id=True)
 
     active_library_items = []
+    known_library_ids = {
+        row[0]
+        for row in db.query(Library.abs_library_id).all()
+    }
     for name, item_library_id, value in active_libraries:
         display_name = name or "Unknown"
         item = {"name": display_name, "value": stat_formatter(value)}
-        if item_library_id:
+        if item_library_id in known_library_ids:
             item["url"] = f"/libraries/{quote(item_library_id, safe='')}"
         active_library_items.append(item)
 
@@ -253,7 +257,12 @@ def build_home_cards(db: Session, metric: str = "count", days: int = 30):
 
 def build_library_cards(db: Session):
     library_rows = []
-    for library in db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all():
+    for library in (
+        db.query(Library)
+        .filter(Library.is_active.is_(True))
+        .order_by(Library.display_order.asc(), Library.name.asc())
+        .all()
+    ):
         imported_count = db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).count()
         value = max(int(library.item_count or 0), int(imported_count or 0))
         library_rows.append(

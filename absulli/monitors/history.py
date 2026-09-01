@@ -21,6 +21,39 @@ from absulli.http.normalizers import (
 
 log = logging.getLogger(__name__)
 
+DELETED_HISTORY_SESSION_HASHES_KEY = "deleted_history_session_hashes"
+
+
+def history_session_hash(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def deleted_history_session_hashes(db: Session) -> set[str]:
+    row = db.query(Setting).filter(Setting.key == DELETED_HISTORY_SESSION_HASHES_KEY).first()
+    if not row:
+        return set()
+    try:
+        values = json.loads(row.value or "[]")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(values, list):
+        return set()
+    return {str(value) for value in values if value}
+
+
+def remember_deleted_history_sessions(db: Session, session_ids: Iterable[str]) -> None:
+    hashes = {history_session_hash(str(session_id)) for session_id in session_ids if session_id}
+    if not hashes:
+        return
+    hashes.update(deleted_history_session_hashes(db))
+    value = json.dumps(sorted(hashes))
+    row = db.query(Setting).filter(Setting.key == DELETED_HISTORY_SESSION_HASHES_KEY).first()
+    if row:
+        row.value = value
+        row.updated_at = utcnow()
+    else:
+        db.add(Setting(key=DELETED_HISTORY_SESSION_HASHES_KEY, value=value, updated_at=utcnow()))
+
 
 class HistoryMonitor:
     def __init__(self, client: AudiobookshelfClient, notifier=None):
@@ -788,15 +821,27 @@ class HistoryMonitor:
             log.warning("Library sync failed: %s", exc)
             return []
 
+        if isinstance(payload, dict):
+            if not isinstance(payload.get("libraries"), list):
+                log.warning("Library sync returned an invalid payload")
+                return []
+        elif not isinstance(payload, list):
+            log.warning("Library sync returned an invalid payload")
+            return []
+
         libraries = normalize_library_payload(payload)
         library_ids = {library["abs_library_id"] for library in libraries if library.get("abs_library_id")}
-        existing_map: dict[str, Library] = {}
-        for chunk in self._chunks(library_ids):
-            for existing in db.query(Library).filter(Library.abs_library_id.in_(chunk)).all():
-                existing_map[existing.abs_library_id] = existing
+        existing_map = {
+            existing.abs_library_id: existing
+            for existing in db.query(Library).all()
+        }
 
         saved = []
         now = utcnow()
+        for library_id, existing in existing_map.items():
+            if library_id not in library_ids and existing.is_active:
+                existing.is_active = False
+                existing.archived_at = now
         for library in libraries:
             library_id = library.get("abs_library_id") or ""
             if not library_id:
@@ -805,9 +850,16 @@ class HistoryMonitor:
             if existing:
                 for key, value in library.items():
                     setattr(existing, key, value)
+                existing.is_active = True
+                existing.archived_at = None
                 existing.updated_at = now
             else:
-                existing = Library(**library, updated_at=now)
+                existing = Library(
+                    **library,
+                    is_active=True,
+                    archived_at=None,
+                    updated_at=now,
+                )
                 db.add(existing)
                 existing_map[library_id] = existing
             saved.append(existing)
@@ -1228,6 +1280,23 @@ class HistoryMonitor:
                 log.warning("History sync failed for user %s: %s", user.username, exc)
                 continue
 
+            suppressed_hashes = deleted_history_session_hashes(db)
+            suppressed_session_ids = {
+                row.get("abs_session_id")
+                for row in rows
+                if row.get("abs_session_id")
+                and history_session_hash(str(row["abs_session_id"])) in suppressed_hashes
+            }
+            for chunk in self._chunks(suppressed_session_ids):
+                db.query(ListeningHistory).filter(
+                    ListeningHistory.abs_session_id.in_(chunk)
+                ).delete(synchronize_session=False)
+            rows = [
+                row
+                for row in rows
+                if row.get("abs_session_id") not in suppressed_session_ids
+            ]
+
             item_ids = {row.get("abs_item_id") for row in rows if row.get("abs_item_id")}
             session_ids = {row.get("abs_session_id") for row in rows if row.get("abs_session_id")}
             media_map = self._media_items_by_abs_id(db, item_ids)
@@ -1243,6 +1312,13 @@ class HistoryMonitor:
                 existing = existing_map.get(session_id)
                 values = self._history_model_values(row)
                 if existing:
+                    incoming_library_id = str(values.get("library_id") or "")
+                    if not incoming_library_id:
+                        values["library_id"] = existing.library_id or ""
+                        if not values.get("library_name"):
+                            values["library_name"] = existing.library_name or ""
+                    elif incoming_library_id == existing.library_id and not values.get("library_name"):
+                        values["library_name"] = existing.library_name or ""
                     for key, value in values.items():
                         setattr(existing, key, value)
                 else:

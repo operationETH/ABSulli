@@ -58,7 +58,7 @@ def _status_payload(db: Session) -> dict:
         "active_sessions": active_sessions_query(db).count(),
         "history_rows": db.query(ListeningHistory).count(),
         "users": db.query(AbsUser).count(),
-        "libraries": db.query(Library).count(),
+        "libraries": db.query(Library).filter(Library.is_active.is_(True)).count(),
         "recent_items": db.query(MediaItem).count(),
     }
 
@@ -138,7 +138,12 @@ def _libraries_payload(db: Session) -> list[dict]:
             "item_count": row.item_count,
             "updated_at": row.updated_at,
         }
-        for row in db.query(Library).order_by(Library.display_order, Library.name).all()
+        for row in (
+            db.query(Library)
+            .filter(Library.is_active.is_(True))
+            .order_by(Library.display_order, Library.name)
+            .all()
+        )
     ]
 
 
@@ -323,7 +328,7 @@ def metrics(request: Request, db: Session = Depends(get_db)):
         library_seconds.labels(library_id=library_id or "unknown", library_name=library_name or "unknown").set(seconds or 0)
         library_sessions.labels(library_id=library_id or "unknown", library_name=library_name or "unknown").set(count or 0)
 
-    for library in db.query(Library).all():
+    for library in db.query(Library).filter(Library.is_active.is_(True)).all():
         library_items.labels(library_id=library.abs_library_id or "unknown", library_name=library.name or "unknown").set(library.item_count or 0)
 
     for row in active_sessions_query(db).order_by(desc(ActivitySession.last_seen_at)).all():
