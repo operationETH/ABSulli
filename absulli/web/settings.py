@@ -108,69 +108,87 @@ NOTIFICATION_EVENT_SETTINGS = {
         "setting": "notify_playback_started",
         "label": "Playback Started",
         "description": "Send when a user starts listening.",
+        "group": "playback",
         "default": False,
     },
     "playback_stop": {
         "setting": "notify_playback_stopped",
         "label": "Playback Stopped",
         "description": "Send when a user stops listening.",
+        "group": "playback",
         "default": False,
     },
     "new_book": {
         "setting": "notify_new_book",
         "label": "New Book Added",
-        "description": "Send when ABSulli detects a new book after the initial library scan.",
+        "description": "Send when ABSulli detects a new book.",
+        "group": "library",
+        "wide": True,
         "default": False,
     },
     "new_series": {
         "setting": "notify_new_series",
         "label": "New Series Added",
-        "description": "Send when ABSulli detects a new series after the initial library scan.",
+        "description": "Send when ABSulli detects a new series.",
+        "group": "library",
         "default": False,
     },
     "book_added_to_series": {
         "setting": "notify_book_added_to_series",
         "label": "Book Added to Series",
-        "description": "Send when ABSulli detects a book added to an existing series after the initial library scan.",
+        "description": "Send when a book is added to an existing series.",
+        "group": "library",
         "default": False,
     },
     "new_collection": {
         "setting": "notify_new_collection",
         "label": "New Collection Added",
-        "description": "Send when ABSulli detects a new collection after the initial collection scan.",
+        "description": "Send when ABSulli detects a new collection.",
+        "group": "library",
         "default": False,
     },
     "book_added_to_collection": {
         "setting": "notify_book_added_to_collection",
         "label": "Book Added to Collection",
-        "description": "Send when ABSulli detects a book added to an existing collection after the initial collection scan.",
+        "description": "Send when a book is added to an existing collection.",
+        "group": "library",
         "default": False,
     },
     "new_podcast": {
         "setting": "notify_new_podcast",
         "label": "New Podcast Added",
-        "description": "Send when ABSulli detects a new podcast after the initial library scan.",
+        "description": "Send when ABSulli detects a new podcast.",
+        "group": "library",
         "default": False,
     },
     "new_podcast_episode": {
         "setting": "notify_new_podcast_episode",
         "label": "New Podcast Episode Added",
-        "description": "Send when ABSulli detects a newly downloaded podcast episode after the initial episode scan.",
+        "description": "Send when a new podcast episode is downloaded.",
+        "group": "library",
         "default": False,
     },
     "abs_connection_failed": {
         "setting": "notify_abs_connection_failed",
         "label": "Audiobookshelf Connection Failed",
         "description": "Send when ABSulli cannot reach Audiobookshelf.",
+        "group": "system",
         "default": False,
     },
     "abs_connection_restored": {
         "setting": "notify_abs_connection_restored",
         "label": "Audiobookshelf Connection Restored",
         "description": "Send when Audiobookshelf starts responding again.",
+        "group": "system",
         "default": False,
     },
 }
+
+NOTIFICATION_EVENT_GROUPS = (
+    ("playback", "Playback", ""),
+    ("library", "Library", "Notifications begin after ABSulli completes the initial scan."),
+    ("system", "System", "These apply globally, not per library."),
+)
 
 NOTIFICATION_TEMPLATE_VARIABLE_GROUPS = [
     {
@@ -583,10 +601,37 @@ def notification_events_context(agent_id: str) -> list[dict[str, object]]:
                 "setting": setting_name,
                 "label": meta["label"],
                 "description": meta["description"],
+                "group": meta.get("group", ""),
+                "wide": bool(meta.get("wide", False)),
                 "enabled": enabled,
             }
         )
     return events
+
+
+def notification_event_groups_context(agent_id: str) -> list[dict[str, object]]:
+    events = notification_events_context(agent_id)
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for event in events:
+        grouped.setdefault(str(event["group"]), []).append(event)
+    groups: list[dict[str, object]] = []
+    known_keys = set()
+    for key, label, note in NOTIFICATION_EVENT_GROUPS:
+        known_keys.add(key)
+        items = grouped.get(key, [])
+        if not items:
+            continue
+        groups.append({"label": label, "note": note, "events": items})
+    other_events = [
+        event
+        for key, items in grouped.items()
+        if key not in known_keys
+        for event in items
+    ]
+    if other_events:
+        groups.append({"label": "Other", "note": "", "events": other_events})
+    return groups
+
 
 def settings_field_from_env(settings, field_name: str) -> bool:
     return settings.field_configured(field_name)
@@ -906,7 +951,7 @@ def agent_settings_context(settings, libraries: list[Library] | None = None) -> 
                 "configured": configured,
                 "env_managed": env_managed,
                 "fields": fields,
-                "notification_events": notification_events_context(agent_id),
+                "notification_event_groups": notification_event_groups_context(agent_id),
                 "library_scope": notification_library_scope_context(agent_id, libraries),
                 "message_templates": notification_templates_context(agent_id),
                 "template_variable_groups": NOTIFICATION_TEMPLATE_VARIABLE_GROUPS,

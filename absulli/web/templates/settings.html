@@ -357,17 +357,25 @@
 
       <div class="notification-events">
         <h3>Notification Events</h3>
-        <div class="event-list">
-          {% for event in agent.notification_events %}
-          <label class="event-option">
-            <input type="checkbox" name="{{ event.setting }}" {% if event.enabled %}checked{% endif %}>
-            <span>
-              <strong>{{ event.label }}</strong>
-              <small>{{ event.description }}</small>
-            </span>
-          </label>
-          {% endfor %}
+        {% for group in agent.notification_event_groups %}
+        <div class="event-group">
+          <div class="event-group-head">
+            <span class="event-group-title">{{ group.label }}</span>
+            {% if group.note %}<span class="event-group-note">{{ group.note }}</span>{% endif %}
+          </div>
+          <div class="event-list">
+            {% for event in group.events %}
+            <label class="event-option{% if event.wide %} event-option-wide{% endif %}">
+              <input type="checkbox" name="{{ event.setting }}" {% if event.enabled %}checked{% endif %}>
+              <span>
+                <strong>{{ event.label }}</strong>
+                <small>{{ event.description }}</small>
+              </span>
+            </label>
+            {% endfor %}
+          </div>
         </div>
+        {% endfor %}
       </div>
 
       <input type="hidden" name="{{ agent.id }}_advanced_open" value="{{ 'true' if agent.advanced_open else 'false' }}" data-agent-advanced-state>

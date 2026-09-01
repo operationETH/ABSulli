@@ -405,6 +405,51 @@ def test_notification_events_and_templates_use_display_order(monkeypatch):
     assert [template["label"] for template in templates] == expected
 
 
+def test_notification_event_groups_include_every_configured_event(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+
+    groups = web_settings.notification_event_groups_context("discord")
+    grouped_events = [event for group in groups for event in group["events"]]
+
+    assert [group["label"] for group in groups] == ["Playback", "Library", "System"]
+    assert len(grouped_events) == len(web_settings.NOTIFICATION_EVENT_SETTINGS)
+    assert {event["event_type"] for event in grouped_events} == set(web_settings.NOTIFICATION_EVENT_SETTINGS)
+
+
+def test_notification_event_groups_show_unknown_groups_under_other(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    monkeypatch.setitem(
+        web_settings.NOTIFICATION_EVENT_SETTINGS,
+        "future_event",
+        {
+            "setting": "notify_future_event",
+            "label": "Future Event",
+            "description": "Send for a future event.",
+            "group": "future",
+            "default": False,
+        },
+    )
+
+    groups = web_settings.notification_event_groups_context("discord")
+
+    assert groups[-1]["label"] == "Other"
+    assert [event["event_type"] for event in groups[-1]["events"]] == ["future_event"]
+
+
+def test_new_book_event_uses_wide_layout(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications&agent=discord")
+
+    assert response.status_code == 200
+    marker = 'name="discord_notify_new_book"'
+    input_position = response.text.index(marker)
+    label_position = response.text.rfind("<label", 0, input_position)
+    assert 'class="event-option event-option-wide"' in response.text[label_position:input_position]
+
+
 def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
     client, store = make_client(monkeypatch)
 
