@@ -195,6 +195,23 @@ def test_notification_language_codes_use_display_names():
     assert context["language"] == "English"
 
 
+def test_item_notification_context_reads_series_name():
+    context = normalize_item_notification_context(
+        {
+            "id": "book-1",
+            "mediaType": "book",
+            "media": {
+                "metadata": {
+                    "title": "The Bourne Identity",
+                    "seriesName": "Jason Bourne",
+                }
+            },
+        }
+    )
+
+    assert context["series"] == "Jason Bourne"
+
+
 def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     rows = normalize_media_item_payload(
         {
@@ -207,7 +224,7 @@ def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
                             "title": "Consent to Kill",
                             "authors": [{"id": "author-1", "name": "Vince Flynn"}],
                             "narratorName": "George Guidall",
-                            "series": [{"name": "Mitch Rapp"}],
+                            "seriesName": "Mitch Rapp",
                             "subtitle": "A Mitch Rapp Novel",
                             "publisher": "Atria",
                             "description": "<p>A <b>thriller</b>.<br /><br />Second paragraph.</p>",
@@ -240,6 +257,7 @@ def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     assert row["author_id"] == "author-1"
     assert row["narrator"] == "George Guidall"
     assert row["series"] == "Mitch Rapp"
+    assert row["series_id"] == ""
     assert row["subtitle"] == "A Mitch Rapp Novel"
     assert row["publisher"] == "Atria"
     assert row["description"] == "A thriller.\n\nSecond paragraph."
@@ -251,6 +269,25 @@ def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     assert row["duration"] == 3600
     assert row["size_bytes"] == 12345
     assert row["added_at"] == datetime(2026, 6, 1, 12, 0, 0)
+
+
+def test_normalize_media_item_payload_reads_expanded_series_id():
+    rows = normalize_media_item_payload(
+        [
+            {
+                "id": "item-1",
+                "media": {
+                    "metadata": {
+                        "title": "Consent to Kill",
+                        "series": [{"id": "series-1", "name": "Mitch Rapp"}],
+                    }
+                },
+            }
+        ]
+    )
+
+    assert rows[0]["series"] == "Mitch Rapp"
+    assert rows[0]["series_id"] == "series-1"
 
 
 def test_normalize_user_and_library_payloads_are_defensive():

@@ -253,6 +253,36 @@ def test_build_library_cards_authors_include_author_cover_and_book_fallback():
     db.close()
 
 
+def test_build_library_cards_hides_archived_libraries():
+    db = make_db()
+    db.add_all(
+        [
+            Library(
+                abs_library_id="lib-active",
+                name="Audiobooks",
+                media_type="book",
+                item_count=10,
+                is_active=True,
+            ),
+            Library(
+                abs_library_id="lib-archived",
+                name="YouTube Podcasts",
+                media_type="book",
+                item_count=53,
+                is_active=False,
+                archived_at=utcnow(),
+            ),
+        ]
+    )
+    db.commit()
+
+    cards = build_library_cards(db)
+    libraries_card = next(card for card in cards if card["title"] == "Libraries")
+
+    assert [item["name"] for item in libraries_card["items"]] == ["Audiobooks"]
+    db.close()
+
+
 def test_build_home_cards_duration_metric_formats_seconds():
     db = make_db()
     db.add_all(

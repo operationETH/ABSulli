@@ -10,7 +10,7 @@ from absulli.web.queries import (
     fmt_seconds,
     media_history_date,
 )
-from absulli.core.time import utcnow
+from absulli.core.time import local_datetime, utcnow
 
 
 def graph_metric_label(metric: str) -> str:
@@ -53,7 +53,7 @@ def make_bar_chart(title: str, subtitle: str, labels: list[str], values: list[fl
 
 def build_activity_heatmap(db: Session, metric: str, user_key: str, weeks: int = 52) -> dict:
     total_days = weeks * 7
-    end_date = utcnow().date()
+    end_date = local_datetime(utcnow()).date()
     start_date = end_date - timedelta(days=total_days - 1)
     since = utcnow() - timedelta(days=total_days)
     query = db.query(ListeningHistory).filter(media_history_date() >= since)
@@ -65,7 +65,10 @@ def build_activity_heatmap(db: Session, metric: str, user_key: str, weeks: int =
         dt = row.started_at or row.updated_at or row.imported_at
         if not dt:
             continue
-        day = dt.date()
+        local_value = local_datetime(dt)
+        if not local_value:
+            continue
+        day = local_value.date()
         if day < start_date or day > end_date:
             continue
         totals[day] = totals.get(day, 0.0) + graph_row_value(row, metric)
@@ -105,14 +108,15 @@ def build_graphs(db: Session, metric: str = "count", days: int = 30, user_key: s
     user_key = clean_graph_user(user_key)
     rows = history_rows_for_graphs(db, days, user_key)
     value_format = graph_value_formatter(metric)
-    now_date = utcnow().date()
+    now_date = local_datetime(utcnow()).date()
     start_date = now_date - timedelta(days=days - 1)
     date_keys = [start_date + timedelta(days=i) for i in range(days)]
     labels = [day.strftime("%b %-d") if hasattr(day, "strftime") else str(day) for day in date_keys]
 
     def row_date(row: ListeningHistory):
         dt = row.started_at or row.updated_at or row.imported_at
-        return dt.date() if dt else None
+        local_value = local_datetime(dt)
+        return local_value.date() if local_value else None
 
     def line_by(field_getter, fallback="Unknown", top_n=4):
         totals: dict[str, float] = {}
@@ -146,9 +150,12 @@ def build_graphs(db: Session, metric: str = "count", days: int = 30, user_key: s
         dt = row.started_at or row.updated_at or row.imported_at
         if not dt:
             continue
+        local_value = local_datetime(dt)
+        if not local_value:
+            continue
         value = graph_row_value(row, metric)
-        hour_values[dt.hour] += value
-        weekday_values[dt.weekday()] += value
+        hour_values[local_value.hour] += value
+        weekday_values[local_value.weekday()] += value
     hour_values = [round(value, 2) for value in hour_values]
     weekday_values = [round(value, 2) for value in weekday_values]
 

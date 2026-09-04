@@ -14,6 +14,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 MISSING_COLUMN_SQL = {
+    "libraries": {
+        "is_active": "ALTER TABLE libraries ADD COLUMN is_active BOOLEAN DEFAULT 1",
+        "archived_at": "ALTER TABLE libraries ADD COLUMN archived_at DATETIME",
+    },
     "media_items": {
         "library_name": "ALTER TABLE media_items ADD COLUMN library_name VARCHAR(255) DEFAULT ''",
         "author_id": "ALTER TABLE media_items ADD COLUMN author_id VARCHAR(128) DEFAULT ''",

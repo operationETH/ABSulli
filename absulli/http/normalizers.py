@@ -359,6 +359,13 @@ def normalize_item_notification_context(payload: dict[str, Any]) -> dict[str, st
         series = safe_text(first.get("name") or first.get("series") or "") if isinstance(first, dict) else safe_text(first)
     elif series_items:
         series = safe_text(series_items)
+    if not series:
+        series = safe_text(
+            metadata.get("seriesName")
+            or media.get("seriesName")
+            or row.get("seriesName")
+            or ""
+        )
     authors = metadata.get("authors")
     narrators = metadata.get("narrators")
     author = extract_author(row, row, media) or safe_text(metadata.get("authorName") or metadata.get("author") or "")
@@ -425,15 +432,24 @@ def normalize_media_item_payload(payload: dict[str, Any] | list[Any], library_id
         title = safe_text(row.get("title") or media.get("title") or metadata.get("title") or "Unknown")
         added_at = parse_ts(row.get("addedAt") or row.get("createdAt") or row.get("ctime"))
         series = ""
+        series_id = ""
         series_items = metadata.get("series") or media.get("series") or row.get("series")
         if isinstance(series_items, list) and series_items:
             first = series_items[0]
             if isinstance(first, dict):
                 series = safe_text(first.get("name") or first.get("series") or "")
+                series_id = safe_text(first.get("id") or first.get("seriesId") or "")
             else:
                 series = safe_text(first)
         elif series_items:
             series = safe_text(series_items)
+        if not series:
+            series = safe_text(
+                metadata.get("seriesName")
+                or media.get("seriesName")
+                or row.get("seriesName")
+                or ""
+            )
         normalized.append(
             {
                 "abs_item_id": safe_text(row.get("id") or row.get("libraryItemId") or ""),
@@ -445,6 +461,7 @@ def normalize_media_item_payload(payload: dict[str, Any] | list[Any], library_id
                 "author_id": extract_author_id(row, row, media),
                 "narrator": safe_text(metadata.get("narratorName") or metadata.get("narrator") or ""),
                 "series": series,
+                "series_id": series_id,
                 "subtitle": safe_text(metadata.get("subtitle") or ""),
                 "publisher": safe_text(metadata.get("publisher") or ""),
                 "description": _plain_text(metadata.get("description") or ""),

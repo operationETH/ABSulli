@@ -122,6 +122,61 @@ def test_get_library_items_sends_expected_path_and_params(monkeypatch):
     ]
 
 
+def test_get_collections_sends_expected_path(monkeypatch):
+    calls = []
+
+    class FakeAsyncClient:
+        is_closed = False
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            return FakeResponse(payload={"collections": []})
+
+        async def aclose(self):
+            self.is_closed = True
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    client = AudiobookshelfClient(make_settings())
+    result = asyncio.run(client.get_collections())
+
+    assert result == {"collections": []}
+    assert calls == [("/api/collections", {"params": None})]
+
+
+def test_get_library_series_sends_expected_path_and_params(monkeypatch):
+    calls = []
+
+    class FakeAsyncClient:
+        is_closed = False
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            return FakeResponse(payload={"results": []})
+
+        async def aclose(self):
+            self.is_closed = True
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    client = AudiobookshelfClient(make_settings())
+    result = asyncio.run(client.get_library_series("library-1", limit=123, page=2))
+
+    assert result == {"results": []}
+    assert calls == [
+        (
+            "/api/libraries/library-1/series",
+            {"params": {"limit": 123, "page": 2}},
+        )
+    ]
+
+
 def test_optional_get_returns_none_only_for_404(monkeypatch):
     statuses = [404, 500]
 

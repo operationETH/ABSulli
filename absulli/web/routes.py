@@ -1,4 +1,5 @@
 from datetime import timedelta
+import hashlib
 import json
 import logging
 import re
@@ -22,10 +23,11 @@ from absulli.core.cover_cache import (
     write_cover_cache,
     write_negative_cover_cache,
 )
-from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent
+from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent, Setting
 from absulli.database.session import get_db
 from absulli.notifiers.manager import NOTIFICATION_TEMPLATE_VARIABLES, WEBHOOK_DEFAULT_PAYLOAD, clean_notification_error, render_webhook_payload, validate_notification_template, validate_webhook_json_template
 from absulli.http.abs_client import AudiobookshelfClient
+from absulli.monitors.history import remember_deleted_history_sessions
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.core.security import (
     clear_csrf_cookie,
@@ -652,7 +654,14 @@ async def author_cover_by_name(
 
     try:
         async with AudiobookshelfClient(settings) as client:
-            library_ids = [row[0] for row in db.query(Library.abs_library_id).all()]
+            library_ids = [
+                row[0]
+                for row in (
+                    db.query(Library.abs_library_id)
+                    .filter(Library.is_active.is_(True))
+                    .all()
+                )
+            ]
             author_payload = await client.find_author_in_libraries(author_name, library_ids)
             author_id = author_payload_value(author_payload, "id", "authorId", "_id", "asin")
             if not author_id:
@@ -825,12 +834,13 @@ def history(request: Request, db: Session = Depends(get_db)):
 @router.get("/libraries", response_class=HTMLResponse)
 def libraries(request: Request, db: Session = Depends(get_db)):
     limit = history_page_size(request)
-    total = db.query(Library).count()
-    pagination = pagination_context(request, total, limit, "synced libraries")
+    total = db.query(Library).filter(Library.is_active.is_(True)).count()
+    pagination = pagination_context(request, total, limit, "active libraries")
     current_page = pagination["pagination"]["current_page"]
     rows = []
     libraries_query = (
         db.query(Library)
+        .filter(Library.is_active.is_(True))
         .order_by(Library.display_order.asc(), Library.name.asc())
         .offset(query_offset(current_page, limit))
         .limit(limit)
@@ -854,18 +864,129 @@ def libraries(request: Request, db: Session = Depends(get_db)):
             }
         )
 
-    return templates.TemplateResponse(
+    archived_rows = []
+    archived_libraries = (
+        db.query(Library)
+        .filter(Library.is_active.is_(False))
+        .order_by(Library.archived_at.desc(), Library.name.asc())
+        .all()
+    )
+    for library in archived_libraries:
+        cached_items = db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).count()
+        history_entries = (
+            db.query(ListeningHistory)
+            .filter(ListeningHistory.library_id == library.abs_library_id)
+            .count()
+        )
+        archived_rows.append(
+            {
+                "library": library,
+                "icon": library_icon(library.media_type),
+                "cached_items": cached_items,
+                "history_entries": history_entries,
+                "url": f"/libraries/{quote(library.abs_library_id, safe='')}",
+                "remove_url": f"/libraries/{quote(library.abs_library_id, safe='')}/remove",
+            }
+        )
+
+    csrf_token = create_csrf_token()
+    removed = str(request.query_params.get("removed") or "")
+    removed_message = {
+        "cache": "Cached library data removed. Listening history was kept.",
+        "all": "Library and listening history permanently deleted.",
+    }.get(removed, "")
+    error_message = {
+        "name": "Library name confirmation did not match.",
+    }.get(str(request.query_params.get("error") or ""), "")
+
+    response = templates.TemplateResponse(
         request,
         "libraries.html",
         {
             "page": "libraries",
             "libraries": rows,
+            "archived_libraries": archived_rows,
             "library_total": total,
+            "removed_message": removed_message,
+            "error_message": error_message,
+            "csrf_token": csrf_token,
             "fmt_seconds": fmt_seconds,
             **history_page_size_context(limit),
             **pagination,
         },
     )
+    set_csrf_cookie(response, csrf_token)
+    return response
+
+
+@router.post("/libraries/{library_id}/remove", response_class=HTMLResponse)
+async def remove_archived_library(library_id: str, request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your library form expired. Refresh and try again.")
+
+    library = db.query(Library).filter(Library.abs_library_id == library_id).first()
+    if not library:
+        raise HTTPException(status_code=404, detail="Library not found")
+    if library.is_active:
+        raise HTTPException(status_code=409, detail="Active libraries cannot be removed from ABSulli")
+
+    mode = str(form.get("mode") or "")
+    if mode not in {"cache", "all"}:
+        raise HTTPException(status_code=400, detail="Invalid library removal mode")
+    if mode == "all" and str(form.get("confirm_name") or "").strip() != library.name:
+        return RedirectResponse("/libraries?error=name", status_code=303)
+
+    item_ids = {
+        row[0]
+        for row in (
+            db.query(MediaItem.abs_item_id)
+            .filter(MediaItem.library_id == library.abs_library_id)
+            .all()
+        )
+        if row[0]
+    }
+    activity_filter = ActivitySession.library_id == library.abs_library_id
+    if item_ids:
+        activity_filter = or_(activity_filter, ActivitySession.abs_item_id.in_(item_ids))
+    db.query(ActivitySession).filter(activity_filter).delete(synchronize_session=False)
+
+    if mode == "all":
+        history_filter = ListeningHistory.library_id == library.abs_library_id
+        if item_ids:
+            history_filter = or_(history_filter, ListeningHistory.abs_item_id.in_(item_ids))
+        deleted_session_ids = [
+            row[0]
+            for row in db.query(ListeningHistory.abs_session_id).filter(history_filter).all()
+            if row[0]
+        ]
+        remember_deleted_history_sessions(db, deleted_session_ids)
+        db.query(ListeningHistory).filter(history_filter).delete(synchronize_session=False)
+
+    db.query(MediaItem).filter(MediaItem.library_id == library.abs_library_id).delete(
+        synchronize_session=False
+    )
+    digest = hashlib.sha256(library.abs_library_id.encode("utf-8")).hexdigest()[:24]
+    baseline_keys = {
+        f"notify_new_book_baseline_{digest}",
+        f"notify_new_series_baseline_{digest}",
+        f"notify_new_series_baseline_v2_{digest}",
+        f"notify_series_membership_baseline_{digest}",
+        f"notify_series_membership_baseline_v2_{digest}",
+        f"notify_new_podcast_baseline_{digest}",
+    }
+    baseline_keys.update(
+        f"notify_podcast_episode_baseline_{hashlib.sha256(item_id.encode('utf-8')).hexdigest()[:24]}"
+        for item_id in item_ids
+    )
+    db.query(Setting).filter(Setting.key.in_(baseline_keys)).delete(synchronize_session=False)
+    if mode == "all":
+        db.delete(library)
+    else:
+        library.item_count = 0
+    db.commit()
+    return RedirectResponse(f"/libraries?removed={mode}", status_code=303)
 
 
 @router.get("/libraries/{library_id}", response_class=HTMLResponse)
@@ -956,7 +1077,14 @@ async def author_detail(author_name: str, request: Request, db: Session = Depend
             if author_id:
                 author_payload = await client.get_author(author_id)
             if not author_payload:
-                library_ids = [row[0] for row in db.query(Library.abs_library_id).all()]
+                library_ids = [
+                    row[0]
+                    for row in (
+                        db.query(Library.abs_library_id)
+                        .filter(Library.is_active.is_(True))
+                        .all()
+                    )
+                ]
                 author_payload = await client.find_author_in_libraries(author_name, library_ids)
                 author_id = author_payload_value(author_payload, "id", "authorId", "_id", "asin") or author_id
             if author_id and (not author_payload or not author_payload_value(author_payload, "description", "desc", "bio", "biography", "summary")):
@@ -1229,7 +1357,12 @@ def graphs(request: Request, db: Session = Depends(get_db)):
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, db: Session = Depends(get_db)):
     settings = get_settings()
-    libraries = db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all()
+    libraries = (
+        db.query(Library)
+        .filter(Library.is_active.is_(True))
+        .order_by(Library.display_order.asc(), Library.name.asc())
+        .all()
+    )
     agent_context = agent_settings_context(settings, libraries)
     safe = {
         "ABS_URL": settings.effective_abs_url,
@@ -1478,7 +1611,12 @@ async def settings_notification_agent_save(request: Request, agent_id: str, db: 
 
     values[f"{agent_id}_enabled"] = "true" if is_enabled else "false"
     values[f"{agent_id}_advanced_open"] = "true" if form.get(f"{agent_id}_advanced_open") == "true" else "false"
-    libraries = db.query(Library).order_by(Library.display_order.asc(), Library.name.asc()).all()
+    libraries = (
+        db.query(Library)
+        .filter(Library.is_active.is_(True))
+        .order_by(Library.display_order.asc(), Library.name.asc())
+        .all()
+    )
     values[f"{agent_id}_notification_libraries"] = notification_library_value_from_form(agent_id, form, libraries)
     if agent_id == "webhook":
         for event_type in NOTIFICATION_EVENT_SETTINGS:

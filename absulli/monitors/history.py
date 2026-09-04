@@ -21,6 +21,39 @@ from absulli.http.normalizers import (
 
 log = logging.getLogger(__name__)
 
+DELETED_HISTORY_SESSION_HASHES_KEY = "deleted_history_session_hashes"
+
+
+def history_session_hash(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def deleted_history_session_hashes(db: Session) -> set[str]:
+    row = db.query(Setting).filter(Setting.key == DELETED_HISTORY_SESSION_HASHES_KEY).first()
+    if not row:
+        return set()
+    try:
+        values = json.loads(row.value or "[]")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(values, list):
+        return set()
+    return {str(value) for value in values if value}
+
+
+def remember_deleted_history_sessions(db: Session, session_ids: Iterable[str]) -> None:
+    hashes = {history_session_hash(str(session_id)) for session_id in session_ids if session_id}
+    if not hashes:
+        return
+    hashes.update(deleted_history_session_hashes(db))
+    value = json.dumps(sorted(hashes))
+    row = db.query(Setting).filter(Setting.key == DELETED_HISTORY_SESSION_HASHES_KEY).first()
+    if row:
+        row.value = value
+        row.updated_at = utcnow()
+    else:
+        db.add(Setting(key=DELETED_HISTORY_SESSION_HASHES_KEY, value=value, updated_at=utcnow()))
+
 
 class HistoryMonitor:
     def __init__(self, client: AudiobookshelfClient, notifier=None):
@@ -44,6 +77,408 @@ class HistoryMonitor:
             row.updated_at = utcnow()
         else:
             db.add(Setting(key=key, value="true", updated_at=utcnow()))
+
+    def _new_series_baseline_key(self, library_id: str) -> str:
+        digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_new_series_baseline_v2_{digest}"
+
+    def _new_series_baseline(self, db: Session, library_id: str) -> set[str] | None:
+        key = self._new_series_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "[]")
+        except (TypeError, ValueError):
+            return set()
+        if not isinstance(values, list):
+            return set()
+        return {str(value) for value in values if value}
+
+    def _store_new_series_baseline(self, db: Session, library_id: str, series_keys: set[str]) -> None:
+        key = self._new_series_baseline_key(library_id)
+        value = json.dumps(sorted(series_keys))
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _series_membership_baseline_key(self, library_id: str) -> str:
+        digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
+        return f"notify_series_membership_baseline_v2_{digest}"
+
+    def _series_membership_baseline(
+        self,
+        db: Session,
+        library_id: str,
+    ) -> dict[str, set[str]] | None:
+        key = self._series_membership_baseline_key(library_id)
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "{}")
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(values, dict):
+            return {}
+        return {
+            str(series_key): {str(item_id) for item_id in item_ids if item_id}
+            for series_key, item_ids in values.items()
+            if series_key and isinstance(item_ids, list)
+        }
+
+    def _store_series_membership_baseline(
+        self,
+        db: Session,
+        library_id: str,
+        membership: dict[str, set[str]],
+    ) -> None:
+        key = self._series_membership_baseline_key(library_id)
+        value = json.dumps(
+            {
+                series_key: sorted(item_ids)
+                for series_key, item_ids in sorted(membership.items())
+            }
+        )
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _series_key(self, item: dict) -> str:
+        series_id = str(item.get("series_id") or "").strip()
+        if series_id:
+            return f"id:{series_id}"
+        series_name = str(item.get("series") or "").strip()
+        return f"name:{series_name.casefold()}" if series_name else ""
+
+    def _legacy_series_key(self, item: dict) -> str:
+        return str(item.get("series") or "").strip().casefold()
+
+    def _migrate_series_baselines(
+        self,
+        current_series: dict[str, dict],
+        baseline: set[str] | None,
+        membership: dict[str, set[str]] | None,
+    ) -> tuple[set[str] | None, dict[str, set[str]] | None]:
+        if baseline is None:
+            return None, membership
+        migrated_baseline = set(baseline)
+        migrated_membership = dict(membership) if membership is not None else None
+        for series_key, item in current_series.items():
+            legacy_key = self._legacy_series_key(item)
+            legacy_keys = {legacy_key, f"name:{legacy_key}"} - {series_key}
+            matched_keys = legacy_keys & migrated_baseline
+            if not legacy_key or not matched_keys:
+                continue
+            migrated_baseline.difference_update(matched_keys)
+            migrated_baseline.add(series_key)
+            if migrated_membership is not None:
+                migrated_items = migrated_membership.get(series_key, set())
+                for matched_key in matched_keys:
+                    migrated_items |= migrated_membership.pop(matched_key, set())
+                if migrated_items:
+                    migrated_membership[series_key] = migrated_items
+        return migrated_baseline, migrated_membership
+
+    def _series_books(self, db: Session, series: dict) -> dict[str, dict]:
+        raw_books = series.get("books") or series.get("items") or series.get("libraryItems")
+        raw_books = raw_books if isinstance(raw_books, list) else []
+        library_id = str(series.get("library_id") or "")
+        library_name = str(series.get("library_name") or "")
+        normalized = normalize_media_item_payload(raw_books, library_id, library_name)
+        books = {
+            str(book["abs_item_id"]): book
+            for book in normalized
+            if book.get("abs_item_id")
+        }
+        item_ids = {
+            str(book.get("id") or book.get("libraryItemId") or "").strip()
+            if isinstance(book, dict)
+            else str(book or "").strip()
+            for book in raw_books
+        }
+        item_ids.discard("")
+        if item_ids:
+            stored_books = db.query(MediaItem).filter(MediaItem.abs_item_id.in_(item_ids)).all()
+            for stored in stored_books:
+                stored_values = {
+                    "abs_item_id": stored.abs_item_id,
+                    "library_id": stored.library_id,
+                    "library_name": stored.library_name,
+                    "media_type": stored.media_type,
+                    "title": stored.title,
+                    "author": stored.author,
+                    "series": stored.series,
+                    "narrator": stored.narrator,
+                    "year": stored.year,
+                }
+                if stored.abs_item_id not in books:
+                    books[stored.abs_item_id] = stored_values
+                    continue
+                book = books[stored.abs_item_id]
+                for field, value in stored_values.items():
+                    if not book.get(field) or book.get(field) in {"Unknown", "unknown"}:
+                        book[field] = value
+        for item_id in item_ids - books.keys():
+            books[item_id] = {
+                "abs_item_id": item_id,
+                "library_id": library_id,
+                "library_name": library_name,
+                "media_type": "book",
+                "title": "Unknown",
+                "author": "",
+            }
+        series_name = str(series.get("series") or "")
+        series_id = str(series.get("series_id") or "")
+        for book in books.values():
+            book["library_id"] = library_id
+            book["library_name"] = library_name
+            book["media_type"] = book.get("media_type") or "book"
+            book["series"] = series_name
+            book["series_id"] = series_id
+        return books
+
+    def _collection_baseline(self, db: Session) -> set[str] | None:
+        row = db.query(Setting).filter(Setting.key == "notify_new_collection_baseline").first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "[]")
+        except (TypeError, ValueError):
+            return set()
+        if not isinstance(values, list):
+            return set()
+        return {str(value) for value in values if value}
+
+    def _store_collection_baseline(self, db: Session, collection_ids: set[str]) -> None:
+        key = "notify_new_collection_baseline"
+        value = json.dumps(sorted(collection_ids))
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _collection_membership_baseline(self, db: Session) -> dict[str, set[str]] | None:
+        row = db.query(Setting).filter(Setting.key == "notify_collection_membership_baseline").first()
+        if not row:
+            return None
+        try:
+            values = json.loads(row.value or "{}")
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(values, dict):
+            return {}
+        return {
+            str(collection_id): {str(item_id) for item_id in item_ids if item_id}
+            for collection_id, item_ids in values.items()
+            if collection_id and isinstance(item_ids, list)
+        }
+
+    def _store_collection_membership_baseline(self, db: Session, membership: dict[str, set[str]]) -> None:
+        key = "notify_collection_membership_baseline"
+        value = json.dumps(
+            {
+                collection_id: sorted(item_ids)
+                for collection_id, item_ids in sorted(membership.items())
+            }
+        )
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+            row.updated_at = utcnow()
+        else:
+            db.add(Setting(key=key, value=value, updated_at=utcnow()))
+
+    def _collection_books(self, db: Session, collection: dict) -> dict[str, dict]:
+        raw_books = collection.get("books")
+        raw_books = raw_books if isinstance(raw_books, list) else []
+        normalized = normalize_media_item_payload(
+            raw_books,
+            str(collection.get("library_id") or ""),
+            str(collection.get("library_name") or ""),
+        )
+        books = {str(book["abs_item_id"]): book for book in normalized if book.get("abs_item_id")}
+        item_ids = {
+            str(book.get("id") or book.get("libraryItemId") or "").strip()
+            if isinstance(book, dict)
+            else str(book or "").strip()
+            for book in raw_books
+        }
+        item_ids.discard("")
+        missing_ids = item_ids - books.keys()
+        if missing_ids:
+            stored_books = db.query(MediaItem).filter(MediaItem.abs_item_id.in_(missing_ids)).all()
+            for stored in stored_books:
+                books[stored.abs_item_id] = {
+                    "abs_item_id": stored.abs_item_id,
+                    "library_id": stored.library_id,
+                    "library_name": stored.library_name,
+                    "media_type": stored.media_type,
+                    "title": stored.title,
+                    "author": stored.author,
+                    "series": stored.series,
+                    "narrator": stored.narrator,
+                    "year": stored.year,
+                }
+        for item_id in missing_ids - books.keys():
+            books[item_id] = {
+                "abs_item_id": item_id,
+                "library_id": collection.get("library_id") or "",
+                "library_name": collection.get("library_name") or "",
+                "media_type": "book",
+                "title": "Unknown",
+                "author": "",
+            }
+        return books
+
+    async def _notify_new_collections(self, db: Session, collections: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for collection in collections:
+            name = str(collection.get("name") or "Unknown collection")
+            library_name = str(collection.get("library_name") or "Audiobookshelf")
+            body = f"{name} was added to {library_name}."
+            books = collection.get("books")
+            book_count = len(books) if isinstance(books, list) else 0
+            try:
+                await self.notifier.notify(
+                    db,
+                    "new_collection",
+                    "New collection added",
+                    body,
+                    library_id=str(collection.get("library_id") or ""),
+                    context={
+                        "collection_id": collection.get("collection_id") or "",
+                        "collection": name,
+                        "collection_description": _plain_text(collection.get("description") or ""),
+                        "book_count": book_count,
+                        "library_name": library_name,
+                        "media_type": "collection",
+                    },
+                )
+            except Exception as exc:
+                log.warning("New collection notification failed for %s: %s", name, exc)
+
+    async def _notify_books_added_to_collections(self, db: Session, additions: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for addition in additions:
+            book = addition["book"]
+            title = str(book.get("title") or "Unknown")
+            author = str(book.get("author") or "Unknown author")
+            collection_name = str(addition.get("collection") or "Unknown collection")
+            library_name = str(addition.get("library_name") or "Audiobookshelf")
+            body = f"{title} by {author} was added to {collection_name} in {library_name}."
+            try:
+                await self.notifier.notify(
+                    db,
+                    "book_added_to_collection",
+                    "Book added to collection",
+                    body,
+                    library_id=str(addition.get("library_id") or ""),
+                    context={
+                        "item_id": book.get("abs_item_id") or "",
+                        "title": title,
+                        "author": author,
+                        "series": book.get("series") or "",
+                        "narrator": book.get("narrator") or "",
+                        "subtitle": book.get("subtitle") or "",
+                        "publisher": book.get("publisher") or "",
+                        "description": _plain_text(book.get("description") or ""),
+                        "isbn": book.get("isbn") or "",
+                        "asin": book.get("asin") or "",
+                        "language": book.get("language") or "",
+                        "year": book.get("year") or "",
+                        "collection_id": addition.get("collection_id") or "",
+                        "collection": collection_name,
+                        "collection_description": _plain_text(addition.get("collection_description") or ""),
+                        "book_count": addition.get("book_count") or 0,
+                        "library_name": library_name,
+                        "media_type": book.get("media_type") or "book",
+                    },
+                )
+            except Exception as exc:
+                log.warning("Collection book notification failed for %s: %s", title, exc)
+
+    async def sync_collections(self, db: Session, libraries: list[Library]) -> int:
+        try:
+            payload = await self.client.get_collections()
+        except Exception as exc:
+            log.warning("Collection sync failed: %s", exc)
+            return 0
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("collections") or payload.get("results") or payload.get("items") or []
+        else:
+            rows = []
+
+        library_names = {library.abs_library_id: library.name for library in libraries}
+        collections = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            collection_id = str(row.get("id") or "").strip()
+            if not collection_id:
+                continue
+            library_id = str(row.get("libraryId") or row.get("library_id") or "").strip()
+            collection = dict(row)
+            collection["collection_id"] = collection_id
+            collection["library_id"] = library_id
+            collection["library_name"] = library_names.get(library_id, "Audiobookshelf")
+            collection["normalized_books"] = self._collection_books(db, collection)
+            collections.append(collection)
+
+        current_ids = {collection["collection_id"] for collection in collections}
+        current_membership = {
+            collection["collection_id"]: set(collection["normalized_books"])
+            for collection in collections
+        }
+        baseline = self._collection_baseline(db)
+        membership_baseline = self._collection_membership_baseline(db)
+        if baseline is None:
+            self._store_collection_baseline(db, current_ids)
+            self._store_collection_membership_baseline(db, current_membership)
+            db.commit()
+            return 0
+
+        new_collections = [collection for collection in collections if collection["collection_id"] not in baseline]
+        additions = []
+        if membership_baseline is not None:
+            for collection in collections:
+                collection_id = collection["collection_id"]
+                if collection_id not in baseline or collection_id not in membership_baseline:
+                    continue
+                new_item_ids = current_membership[collection_id] - membership_baseline[collection_id]
+                for item_id in sorted(new_item_ids):
+                    additions.append(
+                        {
+                            "book": collection["normalized_books"][item_id],
+                            "collection_id": collection_id,
+                            "collection": collection.get("name") or "Unknown collection",
+                            "collection_description": collection.get("description") or "",
+                            "book_count": len(current_membership[collection_id]),
+                            "library_id": collection.get("library_id") or "",
+                            "library_name": collection.get("library_name") or "Audiobookshelf",
+                        }
+                    )
+
+        stored_membership = dict(membership_baseline or {})
+        stored_membership.update(current_membership)
+        self._store_collection_baseline(db, baseline | current_ids)
+        self._store_collection_membership_baseline(db, stored_membership)
+        db.commit()
+        await self._notify_new_collections(db, new_collections)
+        await self._notify_books_added_to_collections(db, additions)
+        return len(new_collections) + len(additions)
 
     async def _notify_new_books(self, db: Session, books: list[dict]) -> None:
         if not self.notifier:
@@ -79,6 +514,78 @@ class HistoryMonitor:
                 )
             except Exception as exc:
                 log.warning("New book notification failed for %s: %s", title, exc)
+
+    async def _notify_new_series(self, db: Session, items: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for item in items:
+            series_name = str(item.get("series") or "Unknown series")
+            library_name = str(item.get("library_name") or "Audiobookshelf")
+            body = f"{series_name} was added to {library_name}."
+            try:
+                await self.notifier.notify(
+                    db,
+                    "new_series",
+                    "New series added",
+                    body,
+                    library_id=str(item.get("library_id") or ""),
+                    context={
+                        "item_id": item.get("abs_item_id") or "",
+                        "title": item.get("title") or "",
+                        "author": item.get("author") or "",
+                        "series": series_name,
+                        "book_count": item.get("book_count") or 0,
+                        "narrator": item.get("narrator") or "",
+                        "subtitle": item.get("subtitle") or "",
+                        "publisher": item.get("publisher") or "",
+                        "description": _plain_text(item.get("description") or ""),
+                        "isbn": item.get("isbn") or "",
+                        "asin": item.get("asin") or "",
+                        "language": item.get("language") or "",
+                        "year": item.get("year") or "",
+                        "library_name": library_name,
+                        "media_type": item.get("media_type") or "book",
+                    },
+                )
+            except Exception as exc:
+                log.warning("New series notification failed for %s: %s", series_name, exc)
+
+    async def _notify_books_added_to_series(self, db: Session, items: list[dict]) -> None:
+        if not self.notifier:
+            return
+        for item in items:
+            title = str(item.get("title") or "Unknown")
+            author = str(item.get("author") or "Unknown author")
+            series_name = str(item.get("series") or "Unknown series")
+            library_name = str(item.get("library_name") or "Audiobookshelf")
+            body = f"{title} by {author} was added to {series_name} in {library_name}."
+            try:
+                await self.notifier.notify(
+                    db,
+                    "book_added_to_series",
+                    "Book added to series",
+                    body,
+                    library_id=str(item.get("library_id") or ""),
+                    context={
+                        "item_id": item.get("abs_item_id") or "",
+                        "title": title,
+                        "author": author,
+                        "series": series_name,
+                        "book_count": item.get("book_count") or 0,
+                        "narrator": item.get("narrator") or "",
+                        "subtitle": item.get("subtitle") or "",
+                        "publisher": item.get("publisher") or "",
+                        "description": _plain_text(item.get("description") or ""),
+                        "isbn": item.get("isbn") or "",
+                        "asin": item.get("asin") or "",
+                        "language": item.get("language") or "",
+                        "year": item.get("year") or "",
+                        "library_name": library_name,
+                        "media_type": item.get("media_type") or "book",
+                    },
+                )
+            except Exception as exc:
+                log.warning("Series book notification failed for %s: %s", title, exc)
 
     def _new_podcast_baseline_key(self, library_id: str) -> str:
         digest = hashlib.sha256(library_id.encode("utf-8")).hexdigest()[:24]
@@ -314,15 +821,27 @@ class HistoryMonitor:
             log.warning("Library sync failed: %s", exc)
             return []
 
+        if isinstance(payload, dict):
+            if not isinstance(payload.get("libraries"), list):
+                log.warning("Library sync returned an invalid payload")
+                return []
+        elif not isinstance(payload, list):
+            log.warning("Library sync returned an invalid payload")
+            return []
+
         libraries = normalize_library_payload(payload)
         library_ids = {library["abs_library_id"] for library in libraries if library.get("abs_library_id")}
-        existing_map: dict[str, Library] = {}
-        for chunk in self._chunks(library_ids):
-            for existing in db.query(Library).filter(Library.abs_library_id.in_(chunk)).all():
-                existing_map[existing.abs_library_id] = existing
+        existing_map = {
+            existing.abs_library_id: existing
+            for existing in db.query(Library).all()
+        }
 
         saved = []
         now = utcnow()
+        for library_id, existing in existing_map.items():
+            if library_id not in library_ids and existing.is_active:
+                existing.is_active = False
+                existing.archived_at = now
         for library in libraries:
             library_id = library.get("abs_library_id") or ""
             if not library_id:
@@ -331,9 +850,16 @@ class HistoryMonitor:
             if existing:
                 for key, value in library.items():
                     setattr(existing, key, value)
+                existing.is_active = True
+                existing.archived_at = None
                 existing.updated_at = now
             else:
-                existing = Library(**library, updated_at=now)
+                existing = Library(
+                    **library,
+                    is_active=True,
+                    archived_at=None,
+                    updated_at=now,
+                )
                 db.add(existing)
                 existing_map[library_id] = existing
             saved.append(existing)
@@ -428,6 +954,14 @@ class HistoryMonitor:
                 return {"results": []}
             return await self.client.get_library_items(library_id, limit=limit)
 
+    async def _get_library_series_page(self, library_id: str, page: int, limit: int) -> dict | list:
+        try:
+            return await self.client.get_library_series(library_id, limit=limit, page=page)
+        except TypeError:
+            if page > 0:
+                return {"results": []}
+            return await self.client.get_library_series(library_id, limit=limit)
+
     async def _fetch_library_items(self, library: Library, limit: int) -> tuple[list[dict], int | None, bool]:
         items: list[dict] = []
         total: int | None = None
@@ -455,6 +989,143 @@ class HistoryMonitor:
 
         log.warning("Stopped library item sync for %s after %s page(s)", library.name, max_pages)
         return items, total, False
+
+    async def _fetch_library_series(self, library: Library, limit: int = 1000) -> tuple[list[dict], bool]:
+        rows: list[dict] = []
+        page = 0
+        max_pages = 1000
+
+        while page < max_pages:
+            payload = await self._get_library_series_page(
+                library.abs_library_id,
+                page=page,
+                limit=limit,
+            )
+            if isinstance(payload, list):
+                page_rows = payload
+            elif isinstance(payload, dict):
+                page_rows = payload.get("results") or payload.get("series") or payload.get("items") or []
+            else:
+                page_rows = []
+            page_rows = [row for row in page_rows if isinstance(row, dict)]
+            rows.extend(page_rows)
+
+            if not self._payload_has_next_page(
+                payload,
+                page=page,
+                row_count=len(page_rows),
+                page_size=limit,
+                loaded_count=len(rows),
+            ):
+                return rows, True
+
+            page += 1
+
+        log.warning("Stopped series sync for %s after %s page(s)", library.name, max_pages)
+        return rows, False
+
+    async def sync_series(self, db: Session, libraries: list[Library]) -> int:
+        detected = 0
+        new_series: list[dict] = []
+        series_additions: list[dict] = []
+        for library in libraries:
+            if str(library.media_type or "").strip().lower() != "book":
+                continue
+            try:
+                rows, complete = await self._fetch_library_series(library)
+            except Exception as exc:
+                log.warning("Series sync failed for %s: %s", library.name, exc)
+                continue
+            if not complete:
+                continue
+
+            current_series: dict[str, dict] = {}
+            current_membership: dict[str, set[str]] = {}
+            for row in rows:
+                series_id = str(row.get("id") or row.get("seriesId") or "").strip()
+                series_name = str(row.get("name") or row.get("series") or "").strip()
+                series = dict(row)
+                series["series_id"] = series_id
+                series["series"] = series_name
+                series["library_id"] = library.abs_library_id
+                series["library_name"] = library.name
+                series_key = self._series_key(series)
+                if not series_key:
+                    continue
+                books = self._series_books(db, series)
+                series["normalized_books"] = books
+                current_series[series_key] = series
+                current_membership[series_key] = set(books)
+
+            baseline = self._new_series_baseline(db, library.abs_library_id)
+            membership_baseline = self._series_membership_baseline(db, library.abs_library_id)
+            baseline, membership_baseline = self._migrate_series_baselines(
+                current_series,
+                baseline,
+                membership_baseline,
+            )
+            if baseline is None:
+                self._store_new_series_baseline(
+                    db,
+                    library.abs_library_id,
+                    set(current_series),
+                )
+                self._store_series_membership_baseline(
+                    db,
+                    library.abs_library_id,
+                    current_membership,
+                )
+                continue
+
+            for series_key in sorted(current_series.keys() - baseline):
+                series = current_series[series_key]
+                books = series["normalized_books"]
+                item = dict(next(iter(books.values()), {}))
+                item.update(
+                    {
+                        "library_id": library.abs_library_id,
+                        "library_name": library.name,
+                        "series": series["series"],
+                        "series_id": series["series_id"],
+                        "book_count": len(books),
+                    }
+                )
+                new_series.append(item)
+
+            if membership_baseline is not None:
+                for series_key, series in current_series.items():
+                    if series_key not in baseline or series_key not in membership_baseline:
+                        continue
+                    books = series["normalized_books"]
+                    added_item_ids = current_membership[series_key] - membership_baseline[series_key]
+                    for item_id in sorted(added_item_ids):
+                        item = dict(books[item_id])
+                        item["book_count"] = len(books)
+                        series_additions.append(item)
+
+            remembered_membership = dict(membership_baseline or {})
+            remembered_membership.update(current_membership)
+            self._store_new_series_baseline(
+                db,
+                library.abs_library_id,
+                baseline | current_series.keys(),
+            )
+            self._store_series_membership_baseline(
+                db,
+                library.abs_library_id,
+                remembered_membership,
+            )
+            detected += len(current_series.keys() - baseline)
+            if membership_baseline is not None:
+                detected += sum(
+                    len(current_membership[series_key] - membership_baseline[series_key])
+                    for series_key in current_series.keys() & baseline & membership_baseline.keys()
+                )
+
+        db.commit()
+        await self._notify_new_series(db, new_series)
+        await self._notify_books_added_to_series(db, series_additions)
+        return detected
 
     async def _fetch_user_history_rows(self, user_id: str, items_per_page: int = 50) -> list[dict]:
         rows: list[dict] = []
@@ -594,6 +1265,8 @@ class HistoryMonitor:
         users = await self.sync_users(db)
         libraries = await self.sync_libraries(db)
         await self.sync_recent_items(db, libraries)
+        await self.sync_series(db, libraries)
+        await self.sync_collections(db, libraries)
         usernames = friendly_names(db)
         library_map = self._libraries_by_abs_id(db)
 
@@ -606,6 +1279,23 @@ class HistoryMonitor:
             except Exception as exc:
                 log.warning("History sync failed for user %s: %s", user.username, exc)
                 continue
+
+            suppressed_hashes = deleted_history_session_hashes(db)
+            suppressed_session_ids = {
+                row.get("abs_session_id")
+                for row in rows
+                if row.get("abs_session_id")
+                and history_session_hash(str(row["abs_session_id"])) in suppressed_hashes
+            }
+            for chunk in self._chunks(suppressed_session_ids):
+                db.query(ListeningHistory).filter(
+                    ListeningHistory.abs_session_id.in_(chunk)
+                ).delete(synchronize_session=False)
+            rows = [
+                row
+                for row in rows
+                if row.get("abs_session_id") not in suppressed_session_ids
+            ]
 
             item_ids = {row.get("abs_item_id") for row in rows if row.get("abs_item_id")}
             session_ids = {row.get("abs_session_id") for row in rows if row.get("abs_session_id")}
@@ -622,6 +1312,13 @@ class HistoryMonitor:
                 existing = existing_map.get(session_id)
                 values = self._history_model_values(row)
                 if existing:
+                    incoming_library_id = str(values.get("library_id") or "")
+                    if not incoming_library_id:
+                        values["library_id"] = existing.library_id or ""
+                        if not values.get("library_name"):
+                            values["library_name"] = existing.library_name or ""
+                    elif incoming_library_id == existing.library_id and not values.get("library_name"):
+                        values["library_name"] = existing.library_name or ""
                     for key, value in values.items():
                         setattr(existing, key, value)
                 else:

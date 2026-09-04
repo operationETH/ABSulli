@@ -18,7 +18,7 @@ from absulli.core.security import (
     verify_password,
 )
 from absulli.web.routes import router as web_router
-from absulli.web.api import router as api_router
+from absulli.web.api import v1_router as api_router
 from absulli.database.models import LoginAttempt, LoginLog
 from absulli.database.session import SessionLocal
 
@@ -465,12 +465,12 @@ def test_revoke_sessions_endpoint_requires_api_token(monkeypatch):
 
     client = TestClient(app)
 
-    no_token = client.post("/api/auth/revoke-sessions")
+    no_token = client.post("/api/v1/auth/revoke-sessions")
     assert no_token.status_code == 401
     assert not called["rotated"]
 
     response = client.post(
-        "/api/auth/revoke-sessions",
+        "/api/v1/auth/revoke-sessions",
         headers={"X-API-Key": "api-token"},
     )
     assert response.status_code == 200

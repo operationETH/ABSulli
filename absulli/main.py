@@ -12,7 +12,7 @@ from absulli.database.session import init_db
 from absulli.core.security import SecurityHeadersMiddleware
 from absulli.core.setup_state import ensure_api_token, is_setup_complete, warm_setup_state_cache
 from absulli.monitors.scheduler import AbsulliScheduler
-from absulli.web.api import metrics_router, router as api_router
+from absulli.web.api import legacy_router, metrics_router, v1_router
 from absulli.web.routes import router as web_router
 
 settings = get_settings()
@@ -39,7 +39,8 @@ app.add_middleware(DynamicCORSMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.mount("/static", StaticFiles(directory="absulli/web/static"), name="static")
 app.include_router(web_router)
-app.include_router(api_router)
+app.include_router(v1_router)
+app.include_router(legacy_router)
 app.include_router(metrics_router)
 
 

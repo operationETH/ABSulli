@@ -13,7 +13,7 @@ import absulli.notifiers.agents as notifier_agents
 import absulli.web.routes as web_routes
 from absulli.database.models import Base, Library, ListeningHistory, MediaItem
 from absulli.database.session import get_db
-from absulli.web.api import router as api_router
+from absulli.web.api import v1_router as api_router
 from absulli.web.queries import library_recently_played_items
 
 
@@ -53,7 +53,7 @@ def test_api_history_uses_abs_session_id_for_session_key():
     app.dependency_overrides[get_db] = override_get_db
     app.include_router(api_router)
 
-    response = TestClient(app).get("/api/history")
+    response = TestClient(app).get("/api/v1/history")
 
     assert response.status_code == 200
     assert response.json()[0]["session_key"] == "abs-session-123"

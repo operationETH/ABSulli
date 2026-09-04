@@ -7,6 +7,13 @@
   </div>
 </section>
 
+{% if removed_message %}
+<section class="notice good">{{ removed_message }}</section>
+{% endif %}
+{% if error_message %}
+<section class="notice warn">{{ error_message }}</section>
+{% endif %}
+
 <section class="panel">
   <div class="panel-head">
     <h2>Library Overview</h2>
@@ -37,14 +44,87 @@
             </td>
             <td>{{ row.library.media_type or 'unknown' }}</td>
             <td>{{ row.item_count }}</td>
-            <td>{{ row.recent_play or 'Never' }}</td>
+            <td>{% if row.recent_play %}{{ row.recent_play|local_datetime }}{% else %}Never{% endif %}</td>
           </tr>
         {% else %}
-          <tr><td colspan="4" class="empty">No libraries have been synced yet.</td></tr>
+          <tr><td colspan="4" class="empty">No active libraries have been synced yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% include "partials/pagination.html" %}
 </section>
+
+{% if archived_libraries %}
+<section class="panel archived-libraries-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Archived Libraries</h2>
+      <p class="panel-description">Libraries no longer returned by Audiobookshelf are hidden from active views but retain their ABSulli data.</p>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table archived-libraries-table">
+      <thead>
+        <tr>
+          <th>Library</th>
+          <th>Type</th>
+          <th>Cached Items</th>
+          <th>History</th>
+          <th>Last Seen</th>
+          <th>Archived</th>
+          <th>Manage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in archived_libraries %}
+        <tr>
+          <td>
+            <a class="table-link" href="{{ row.url }}">
+              <span aria-hidden="true">{{ row.icon }}</span>
+              {{ row.library.name or 'Unknown library' }}
+            </a>
+          </td>
+          <td>{{ row.library.media_type or 'unknown' }}</td>
+          <td>{{ row.cached_items }}</td>
+          <td>{{ row.history_entries }}</td>
+          <td>{{ row.library.updated_at|local_datetime }}</td>
+          <td>{{ row.library.archived_at|local_datetime }}</td>
+          <td class="archived-library-actions">
+            <button class="library-manage-button" type="button" data-library-manage-open="library-manage-{{ loop.index }}">Manage</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% for row in archived_libraries %}
+  <dialog class="library-manage-dialog" id="library-manage-{{ loop.index }}" data-library-manage-dialog aria-labelledby="library-manage-title-{{ loop.index }}">
+    <div class="library-manage-dialog-head">
+      <h3 id="library-manage-title-{{ loop.index }}">Manage {{ row.library.name or 'Unknown library' }}</h3>
+      <button class="library-manage-close" type="button" data-library-manage-close aria-label="Close">&times;</button>
+    </div>
+    <div class="library-manage-dialog-body">
+      <p>Removing cached data keeps listening history. Restoring this library in Audiobookshelf will add it to ABSulli again.</p>
+      <form method="post" action="{{ row.remove_url }}" data-library-remove-cache>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="mode" value="cache">
+        <button class="secondary" type="submit">Remove cached data</button>
+      </form>
+      <form class="library-delete-form" method="post" action="{{ row.remove_url }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="mode" value="all">
+        <label>
+          Type <strong>{{ row.library.name }}</strong> to delete everything
+          <input name="confirm_name" type="text" autocomplete="off" required>
+        </label>
+        <button class="danger-button" type="submit">Delete everything</button>
+      </form>
+    </div>
+  </dialog>
+  {% endfor %}
+</section>
+{% endif %}
 {% endblock %}

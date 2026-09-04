@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import Response
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, Summary, generate_latest
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -10,25 +11,42 @@ from absulli.core.setup_state import get_setup_setting, is_setup_complete
 from absulli.core.time import utcnow, utcnow_iso, unix_seconds
 from absulli.core.security import rotate_session_version, verify_metrics_access
 from absulli.web.queries import active_sessions_query, enrich_active_rows
+from absulli.web.api_models import (
+    ActivityRow,
+    HistoryRow,
+    LibraryRow,
+    RevokeResponse,
+    StatusResponse,
+    UserRow,
+)
 
-router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
+
+v1_router = APIRouter(prefix="/api/v1", tags=["api-v1"])
+legacy_router = APIRouter(prefix="/api", include_in_schema=False)
+
 metrics_router = APIRouter()
 
+_deprecation_logged: set[str] = set()
 
-@router.post("/auth/revoke-sessions")
-def revoke_browser_sessions(request: Request):
-    if getattr(request.state, "absulli_auth_method", "") != "api_token":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="API token required to revoke browser sessions",
+
+def _mark_deprecated(response: Response, request: Request, successor: str) -> None:
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = f'<{successor}>; rel="successor-version"'
+    response.headers["Warning"] = (
+        f'299 - "This endpoint is deprecated; use {successor}"'
+    )
+    path = request.url.path
+    if path not in _deprecation_logged:
+        _deprecation_logged.add(path)
+        logger.warning(
+            "Deprecated API path %s was called; callers should move to %s",
+            path,
+            successor,
         )
 
-    rotate_session_version()
-    return {"status": "ok", "revoked_sessions": True}
 
-
-@router.get("/status")
-def status(db: Session = Depends(get_db)):
+def _status_payload(db: Session) -> dict:
     abs_reachable_value = get_setup_setting("abs_reachable", "")
     return {
         "status": "ok",
@@ -40,13 +58,12 @@ def status(db: Session = Depends(get_db)):
         "active_sessions": active_sessions_query(db).count(),
         "history_rows": db.query(ListeningHistory).count(),
         "users": db.query(AbsUser).count(),
-        "libraries": db.query(Library).count(),
+        "libraries": db.query(Library).filter(Library.is_active.is_(True)).count(),
         "recent_items": db.query(MediaItem).count(),
     }
 
 
-@router.get("/activity")
-def activity(db: Session = Depends(get_db)):
+def _activity_payload(db: Session) -> list[dict]:
     rows = active_sessions_query(db).order_by(desc(ActivitySession.last_seen_at)).all()
     enrich_active_rows(db, rows)
     return [
@@ -75,9 +92,13 @@ def activity(db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/history")
-def history(limit: int = 100, db: Session = Depends(get_db)):
-    rows = db.query(ListeningHistory).order_by(desc(ListeningHistory.imported_at)).limit(min(limit, 500)).all()
+def _history_payload(db: Session, limit: int) -> list[dict]:
+    rows = (
+        db.query(ListeningHistory)
+        .order_by(desc(ListeningHistory.imported_at))
+        .limit(min(limit, 500))
+        .all()
+    )
     return [
         {
             "session_key": row.abs_session_id,
@@ -101,16 +122,14 @@ def history(limit: int = 100, db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/users")
-def users(db: Session = Depends(get_db)):
+def _users_payload(db: Session) -> list[dict]:
     return [
         {"id": row.abs_user_id, "username": row.username, "display_name": row.display_name, "is_active": row.is_active}
         for row in db.query(AbsUser).order_by(AbsUser.username).all()
     ]
 
 
-@router.get("/libraries")
-def libraries(db: Session = Depends(get_db)):
+def _libraries_payload(db: Session) -> list[dict]:
     return [
         {
             "id": row.abs_library_id,
@@ -119,8 +138,89 @@ def libraries(db: Session = Depends(get_db)):
             "item_count": row.item_count,
             "updated_at": row.updated_at,
         }
-        for row in db.query(Library).order_by(Library.display_order, Library.name).all()
+        for row in (
+            db.query(Library)
+            .filter(Library.is_active.is_(True))
+            .order_by(Library.display_order, Library.name)
+            .all()
+        )
     ]
+
+
+def _revoke_sessions(request: Request) -> dict:
+    if getattr(request.state, "absulli_auth_method", "") != "api_token":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API token required to revoke browser sessions",
+        )
+    rotate_session_version()
+    return {"status": "ok", "revoked_sessions": True}
+
+
+@v1_router.get("/status", response_model=StatusResponse)
+def v1_status(db: Session = Depends(get_db)):
+    return _status_payload(db)
+
+
+@v1_router.get("/activity", response_model=list[ActivityRow])
+def v1_activity(db: Session = Depends(get_db)):
+    return _activity_payload(db)
+
+
+@v1_router.get("/history", response_model=list[HistoryRow])
+def v1_history(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)):
+    return _history_payload(db, limit)
+
+
+@v1_router.get("/users", response_model=list[UserRow])
+def v1_users(db: Session = Depends(get_db)):
+    return _users_payload(db)
+
+
+@v1_router.get("/libraries", response_model=list[LibraryRow])
+def v1_libraries(db: Session = Depends(get_db)):
+    return _libraries_payload(db)
+
+
+@v1_router.post("/auth/revoke-sessions", response_model=RevokeResponse)
+def v1_revoke_sessions(request: Request):
+    return _revoke_sessions(request)
+
+
+@legacy_router.get("/status", response_model=StatusResponse)
+def legacy_status(request: Request, response: Response, db: Session = Depends(get_db)):
+    _mark_deprecated(response, request, "/api/v1/status")
+    return _status_payload(db)
+
+
+@legacy_router.get("/activity", response_model=list[ActivityRow])
+def legacy_activity(request: Request, response: Response, db: Session = Depends(get_db)):
+    _mark_deprecated(response, request, "/api/v1/activity")
+    return _activity_payload(db)
+
+
+@legacy_router.get("/history", response_model=list[HistoryRow])
+def legacy_history(request: Request, response: Response, limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)):
+    _mark_deprecated(response, request, "/api/v1/history")
+    return _history_payload(db, limit)
+
+
+@legacy_router.get("/users", response_model=list[UserRow])
+def legacy_users(request: Request, response: Response, db: Session = Depends(get_db)):
+    _mark_deprecated(response, request, "/api/v1/users")
+    return _users_payload(db)
+
+
+@legacy_router.get("/libraries", response_model=list[LibraryRow])
+def legacy_libraries(request: Request, response: Response, db: Session = Depends(get_db)):
+    _mark_deprecated(response, request, "/api/v1/libraries")
+    return _libraries_payload(db)
+
+
+@legacy_router.post("/auth/revoke-sessions", response_model=RevokeResponse)
+def legacy_revoke_sessions(request: Request, response: Response):
+    _mark_deprecated(response, request, "/api/v1/auth/revoke-sessions")
+    return _revoke_sessions(request)
 
 
 @metrics_router.get("/metrics")
@@ -228,7 +328,7 @@ def metrics(request: Request, db: Session = Depends(get_db)):
         library_seconds.labels(library_id=library_id or "unknown", library_name=library_name or "unknown").set(seconds or 0)
         library_sessions.labels(library_id=library_id or "unknown", library_name=library_name or "unknown").set(count or 0)
 
-    for library in db.query(Library).all():
+    for library in db.query(Library).filter(Library.is_active.is_(True)).all():
         library_items.labels(library_id=library.abs_library_id or "unknown", library_name=library.name or "unknown").set(library.item_count or 0)
 
     for row in active_sessions_query(db).order_by(desc(ActivitySession.last_seen_at)).all():

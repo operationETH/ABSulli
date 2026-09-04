@@ -9,6 +9,10 @@
   <strong>{{ library.name }}</strong>
 </nav>
 
+{% if not library.is_active %}
+<section class="notice warn">This library is archived because Audiobookshelf no longer returns it. Its cached metadata and listening history are still available.</section>
+{% endif %}
+
 <section class="library-hero">
   <div class="library-icon">{{ library_icon }}</div>
 

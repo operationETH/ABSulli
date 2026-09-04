@@ -369,12 +369,85 @@ def test_notification_events_use_agent_specific_names(monkeypatch):
             'notify_playback_stopped',
             'notify_abs_connection_failed',
             'notify_abs_connection_restored',
+            'notify_book_added_to_collection',
+            'notify_book_added_to_series',
             'notify_new_book',
+            'notify_new_collection',
             'notify_new_podcast',
             'notify_new_podcast_episode',
+            'notify_new_series',
         ]:
             assert response.text.count(f'name="{agent_id}_{setting}"') == 1
     assert response.text.count('Notification Events') == 9
+
+
+def test_notification_events_and_templates_use_display_order(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    expected = [
+        "Playback Started",
+        "Playback Stopped",
+        "New Book Added",
+        "New Series Added",
+        "Book Added to Series",
+        "New Collection Added",
+        "Book Added to Collection",
+        "New Podcast Added",
+        "New Podcast Episode Added",
+        "Audiobookshelf Connection Failed",
+        "Audiobookshelf Connection Restored",
+    ]
+
+    events = web_settings.notification_events_context("discord")
+    templates = web_settings.notification_templates_context("discord")
+
+    assert [event["label"] for event in events] == expected
+    assert [template["label"] for template in templates] == expected
+
+
+def test_notification_event_groups_include_every_configured_event(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+
+    groups = web_settings.notification_event_groups_context("discord")
+    grouped_events = [event for group in groups for event in group["events"]]
+
+    assert [group["label"] for group in groups] == ["Playback", "Library", "System"]
+    assert len(grouped_events) == len(web_settings.NOTIFICATION_EVENT_SETTINGS)
+    assert {event["event_type"] for event in grouped_events} == set(web_settings.NOTIFICATION_EVENT_SETTINGS)
+
+
+def test_notification_event_groups_show_unknown_groups_under_other(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    assert client
+    monkeypatch.setitem(
+        web_settings.NOTIFICATION_EVENT_SETTINGS,
+        "future_event",
+        {
+            "setting": "notify_future_event",
+            "label": "Future Event",
+            "description": "Send for a future event.",
+            "group": "future",
+            "default": False,
+        },
+    )
+
+    groups = web_settings.notification_event_groups_context("discord")
+
+    assert groups[-1]["label"] == "Other"
+    assert [event["event_type"] for event in groups[-1]["events"]] == ["future_event"]
+
+
+def test_new_book_event_uses_wide_layout(monkeypatch):
+    client, _store = make_client(monkeypatch)
+
+    response = client.get("/settings?tab=notifications&agent=discord")
+
+    assert response.status_code == 200
+    marker = 'name="discord_notify_new_book"'
+    input_position = response.text.index(marker)
+    label_position = response.text.rfind("<label", 0, input_position)
+    assert 'class="event-option event-option-wide"' in response.text[label_position:input_position]
 
 
 def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
@@ -397,9 +470,13 @@ def test_notification_event_settings_save_only_for_selected_agent(monkeypatch):
     assert store['discord_notify_playback_stopped'] == 'false'
     assert store['discord_notify_abs_connection_failed'] == 'false'
     assert store['discord_notify_abs_connection_restored'] == 'true'
+    assert store['discord_notify_book_added_to_collection'] == 'false'
+    assert store['discord_notify_book_added_to_series'] == 'false'
     assert store['discord_notify_new_book'] == 'false'
+    assert store['discord_notify_new_collection'] == 'false'
     assert store['discord_notify_new_podcast'] == 'false'
     assert store['discord_notify_new_podcast_episode'] == 'false'
+    assert store['discord_notify_new_series'] == 'false'
     assert 'gotify_notify_playback_started' not in store
     assert 'notify_playback_started' not in store
 
@@ -430,9 +507,13 @@ def test_notification_events_default_to_unchecked(monkeypatch):
             'notify_playback_stopped',
             'notify_abs_connection_failed',
             'notify_abs_connection_restored',
+            'notify_book_added_to_collection',
+            'notify_book_added_to_series',
             'notify_new_book',
+            'notify_new_collection',
             'notify_new_podcast',
             'notify_new_podcast_episode',
+            'notify_new_series',
         ]:
             marker = f'name="{agent_id}_{setting}"'
             start = response.text.index(marker)
@@ -452,9 +533,13 @@ def test_notification_manager_defaults_all_events_disabled(monkeypatch):
     assert event_enabled('playback_stop') is False
     assert event_enabled('abs_connection_failed') is False
     assert event_enabled('abs_connection_restored') is False
+    assert event_enabled('book_added_to_collection') is False
+    assert event_enabled('book_added_to_series') is False
     assert event_enabled('new_book') is False
+    assert event_enabled('new_collection') is False
     assert event_enabled('new_podcast') is False
     assert event_enabled('new_podcast_episode') is False
+    assert event_enabled('new_series') is False
 
 
 def test_notification_manager_supports_agent_specific_events(monkeypatch):
@@ -1038,6 +1123,7 @@ def test_notification_settings_page_shows_template_variables(monkeypatch):
     assert "{audible_url}" not in form_html
     assert "{itunes_id}" in response.text
     assert "{apple_podcasts_url}" in response.text
+    assert "Number of books in a collection or series" in response.text
     assert 'name="gotify_new_book_title_template"' in response.text
     assert 'name="gotify_new_book_body_template"' in response.text
 
