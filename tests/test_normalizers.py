@@ -195,6 +195,23 @@ def test_notification_language_codes_use_display_names():
     assert context["language"] == "English"
 
 
+def test_item_notification_context_reads_series_name():
+    context = normalize_item_notification_context(
+        {
+            "id": "book-1",
+            "mediaType": "book",
+            "media": {
+                "metadata": {
+                    "title": "The Bourne Identity",
+                    "seriesName": "Jason Bourne",
+                }
+            },
+        }
+    )
+
+    assert context["series"] == "Jason Bourne"
+
+
 def test_normalize_media_item_payload_extracts_metadata_and_filters_empty_ids():
     rows = normalize_media_item_payload(
         {

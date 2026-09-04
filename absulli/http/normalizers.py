@@ -359,6 +359,13 @@ def normalize_item_notification_context(payload: dict[str, Any]) -> dict[str, st
         series = safe_text(first.get("name") or first.get("series") or "") if isinstance(first, dict) else safe_text(first)
     elif series_items:
         series = safe_text(series_items)
+    if not series:
+        series = safe_text(
+            metadata.get("seriesName")
+            or media.get("seriesName")
+            or row.get("seriesName")
+            or ""
+        )
     authors = metadata.get("authors")
     narrators = metadata.get("narrators")
     author = extract_author(row, row, media) or safe_text(metadata.get("authorName") or metadata.get("author") or "")

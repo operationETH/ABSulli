@@ -931,6 +931,7 @@ def test_new_series_notifications_start_after_silent_library_baseline():
             "lib-1",
         ),
     ]
+    assert notifier.contexts[0]["series"] == "Jason Bourne"
     assert notifier.contexts[1]["series"] == "Jason Bourne"
     assert notifier.contexts[1]["item_id"] == "item-2"
     assert notifier.contexts[1]["book_count"] == 1
