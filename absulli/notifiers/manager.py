@@ -93,10 +93,70 @@ NOTIFICATION_TEMPLATE_VARIABLES = {
 }
 
 
-def validate_notification_template(value: str) -> str:
-    template = str(value or "")
+_NOTIFICATION_CONDITIONAL_TAG = re.compile(r"\{%\s*(.*?)\s*%\}", re.DOTALL)
+_NOTIFICATION_CONDITIONAL_IF = re.compile(r"if\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _parse_notification_conditionals(template: str) -> list[tuple[str, str, str, str]]:
+    nodes: list[tuple[str, str, str, str]] = []
+    position = 0
+    variable = ""
+    true_parts: list[str] = []
+    false_parts: list[str] = []
+    in_else = False
+
+    def add_text(text: str) -> None:
+        probe = text.replace("{{", "").replace("}}", "")
+        if "{%" in probe or "%}" in probe:
+            raise ValueError("Notification template has invalid conditional syntax")
+        if variable:
+            target = false_parts if in_else else true_parts
+            target.append(text)
+        else:
+            nodes.append(("text", text, "", ""))
+
+    for match in _NOTIFICATION_CONDITIONAL_TAG.finditer(template):
+        add_text(template[position:match.start()])
+        directive = match.group(1).strip()
+        if directive.startswith("if"):
+            condition = _NOTIFICATION_CONDITIONAL_IF.fullmatch(directive)
+            if condition is None:
+                raise ValueError("Notification template has invalid conditional syntax")
+            if variable:
+                raise ValueError("Notification conditional blocks cannot be nested")
+            variable = condition.group(1)
+            if variable not in NOTIFICATION_TEMPLATE_VARIABLES:
+                raise ValueError(f"Unknown notification variable: {{{variable}}}")
+            true_parts = []
+            false_parts = []
+            in_else = False
+        elif directive == "else":
+            if not variable:
+                raise ValueError("Notification template has an unexpected {% else %}")
+            if in_else:
+                raise ValueError("Notification conditional block has more than one {% else %}")
+            in_else = True
+        elif directive == "endif":
+            if not variable:
+                raise ValueError("Notification template has an unexpected {% endif %}")
+            nodes.append(("conditional", variable, "".join(true_parts), "".join(false_parts)))
+            variable = ""
+            true_parts = []
+            false_parts = []
+            in_else = False
+        else:
+            raise ValueError("Notification template has invalid conditional syntax")
+        position = match.end()
+
+    add_text(template[position:])
+    if variable:
+        raise ValueError("Notification conditional block is missing {% endif %}")
+    return nodes
+
+
+def _validate_notification_fields(value: str) -> None:
     try:
-        parsed = list(string.Formatter().parse(template))
+        parsed = list(string.Formatter().parse(value))
     except ValueError as exc:
         raise ValueError("Notification template has invalid braces") from exc
     for _literal, field_name, format_spec, conversion in parsed:
@@ -106,13 +166,29 @@ def validate_notification_template(value: str) -> str:
             raise ValueError(f"Unknown notification variable: {{{field_name}}}")
         if format_spec or conversion:
             raise ValueError("Notification variables do not support formatting options")
+
+
+def validate_notification_template(value: str) -> str:
+    template = str(value or "")
+    for node_type, first, second, third in _parse_notification_conditionals(template):
+        if node_type == "text":
+            _validate_notification_fields(first)
+        else:
+            _validate_notification_fields(second)
+            _validate_notification_fields(third)
     return template
 
 
 def render_notification_template(template: str, values: dict[str, object]) -> str:
     validated = validate_notification_template(template)
     safe_values = {name: str(values.get(name) or "") for name in NOTIFICATION_TEMPLATE_VARIABLES}
-    return validated.format_map(safe_values)
+    rendered_parts = []
+    for node_type, first, second, third in _parse_notification_conditionals(validated):
+        if node_type == "text":
+            rendered_parts.append(first)
+        else:
+            rendered_parts.append(second if safe_values[first].strip() else third)
+    return "".join(rendered_parts).format_map(safe_values)
 
 
 
@@ -472,30 +548,30 @@ class NotificationManager:
                     template_values["isbn"] = f"[{isbn}]({isbn_url})"
             rendered_title = title
             rendered_body = body
-            if agent_id != "webhook":
-                title_template = setup_state.get_setup_setting(f"{agent_id}_{event_type}_title_template", "")
-                body_template = setup_state.get_setup_setting(f"{agent_id}_{event_type}_body_template", "")
-                if title_template:
-                    rendered_title = render_notification_template(title_template, template_values)
-                if body_template:
-                    rendered_body = render_notification_template(body_template, template_values)
-            if agent_id == "gotify":
-                if cover_url and self.settings.effective_bool_setting("gotify_include_cover_art", default=False):
-                    extra["cover_url"] = cover_url
-                if audiobookshelf_url and self.settings.effective_bool_setting("gotify_open_in_audiobookshelf", default=False):
-                    extra["click_url"] = audiobookshelf_url
-            if agent_id == "discord":
-                if cover_url and self.settings.effective_bool_setting("discord_include_cover_art", default=False):
-                    extra["cover_url"] = cover_url
-                if audiobookshelf_url and self.settings.effective_bool_setting("discord_open_in_audiobookshelf", default=False):
-                    extra["click_url"] = audiobookshelf_url
-            if agent_id == "pushbullet":
-                if audiobookshelf_url and self.settings.effective_bool_setting("pushbullet_open_in_audiobookshelf", default=False):
-                    extra["click_url"] = audiobookshelf_url
-            if agent_id == "webhook":
-                payload_template = setup_state.get_setup_setting("webhook_payload_template", "").strip() or WEBHOOK_DEFAULT_PAYLOAD
-                extra["webhook_payload"] = render_webhook_payload(payload_template, template_values)
             try:
+                if agent_id != "webhook":
+                    title_template = setup_state.get_setup_setting(f"{agent_id}_{event_type}_title_template", "")
+                    body_template = setup_state.get_setup_setting(f"{agent_id}_{event_type}_body_template", "")
+                    if title_template:
+                        rendered_title = render_notification_template(title_template, template_values)
+                    if body_template:
+                        rendered_body = render_notification_template(body_template, template_values)
+                if agent_id == "gotify":
+                    if cover_url and self.settings.effective_bool_setting("gotify_include_cover_art", default=False):
+                        extra["cover_url"] = cover_url
+                    if audiobookshelf_url and self.settings.effective_bool_setting("gotify_open_in_audiobookshelf", default=False):
+                        extra["click_url"] = audiobookshelf_url
+                if agent_id == "discord":
+                    if cover_url and self.settings.effective_bool_setting("discord_include_cover_art", default=False):
+                        extra["cover_url"] = cover_url
+                    if audiobookshelf_url and self.settings.effective_bool_setting("discord_open_in_audiobookshelf", default=False):
+                        extra["click_url"] = audiobookshelf_url
+                if agent_id == "pushbullet":
+                    if audiobookshelf_url and self.settings.effective_bool_setting("pushbullet_open_in_audiobookshelf", default=False):
+                        extra["click_url"] = audiobookshelf_url
+                if agent_id == "webhook":
+                    payload_template = setup_state.get_setup_setting("webhook_payload_template", "").strip() or WEBHOOK_DEFAULT_PAYLOAD
+                    extra["webhook_payload"] = render_webhook_payload(payload_template, template_values)
                 await agent.send(rendered_title, rendered_body, extra)
                 delivery.delivered = True
                 delivered = True
