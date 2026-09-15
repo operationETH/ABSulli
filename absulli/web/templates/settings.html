@@ -422,6 +422,24 @@
             </div>
             {% endfor %}
           </div>
+          <div class="template-variable-group template-conditional-section">
+            <strong>Conditional formatting</strong>
+            <div class="template-conditional-help">
+              <div>
+                <strong>Basic syntax</strong>
+                <code>{% raw %}{% if variable %}text{% endif %}{% endraw %}</code>
+              </div>
+              <div>
+                <strong>Optional fallback</strong>
+                <code>{% raw %}{% if variable %}text{% else %}fallback text{% endif %}{% endraw %}</code>
+              </div>
+              <div>
+                <strong>Example</strong>
+                <code>{% raw %}{title}{% if subtitle %}: {subtitle}{% endif %}{% endraw %}</code>
+              </div>
+              <p>The example displays <code>title: subtitle</code> when the subtitle is not blank and only <code>title</code> when it is blank. Replace <code>variable</code> with any available variable name without braces. Conditions must be separate and cannot be placed inside one another.</p>
+            </div>
+          </div>
           <p class="template-variable-note">Descriptions are shortened for notifications. Cover art and the Audiobookshelf action link are added automatically when their agent options are enabled.</p>
         </details>
         <div class="notification-template-list">

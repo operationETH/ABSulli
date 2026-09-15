@@ -2588,6 +2588,39 @@ a.version-status-badge:hover { filter: brightness(1.12); }
   font-size: 11px;
   line-height: 1.4;
 }
+.template-conditional-section {
+  margin-top: 12px;
+}
+.template-conditional-help {
+  display: grid;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  background: #202020;
+}
+.template-conditional-help > div {
+  display: grid;
+  gap: 4px;
+}
+.template-conditional-help strong {
+  color: #aaa;
+  font-size: 10px;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+.template-conditional-help code {
+  width: fit-content;
+  max-width: 100%;
+  color: #d7b85b;
+  overflow-wrap: anywhere;
+}
+.template-conditional-help p {
+  margin: 1px 0 0;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .notification-template-list {
   display: grid;
   gap: 8px;

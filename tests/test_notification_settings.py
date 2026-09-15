@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.datastructures import FormData
@@ -9,7 +10,11 @@ import absulli.web.routes as web_routes
 import absulli.web.settings as web_settings
 from absulli.core.config import Settings, get_settings
 from absulli.database.models import Library, NotificationDelivery, NotificationEvent
-from absulli.notifiers.manager import NotificationManager
+from absulli.notifiers.manager import (
+    NotificationManager,
+    render_notification_template,
+    validate_notification_template,
+)
 from absulli.web.routes import router as web_router
 
 
@@ -677,6 +682,67 @@ def test_notification_manager_records_delivery_status_per_agent(monkeypatch):
     assert discord.error == 'Discord rejected the webhook'
 
 
+def test_notification_manager_contains_template_render_failure(monkeypatch):
+    client, _store = make_client(
+        monkeypatch,
+        {
+            'gotify_notify_new_book': 'true',
+            'discord_notify_new_book': 'true',
+            'gotify_new_book_body_template': '{% if subtitle %}: {subtitle}',
+        },
+    )
+    assert client
+
+    calls = []
+
+    class FakeAgent:
+        def __init__(self, name):
+            self.name = name
+
+        async def send(self, title, message, extra=None):
+            calls.append(self.name)
+
+    class FakeDb:
+        def __init__(self):
+            self.events = []
+            self.deliveries = []
+
+        def add(self, record):
+            if isinstance(record, NotificationEvent):
+                record.id = 42
+                self.events.append(record)
+            if isinstance(record, NotificationDelivery):
+                self.deliveries.append(record)
+
+        def commit(self):
+            pass
+
+    manager = NotificationManager(get_settings())
+    monkeypatch.setattr(
+        manager,
+        'named_agents',
+        lambda: [
+            ('gotify', FakeAgent('gotify')),
+            ('discord', FakeAgent('discord')),
+        ],
+    )
+    db = FakeDb()
+
+    asyncio.run(manager.notify(db, 'new_book', 'New book added', 'Example'))
+
+    assert calls == ['discord']
+    assert len(db.deliveries) == 2
+
+    gotify = next(delivery for delivery in db.deliveries if delivery.agent == 'gotify')
+    discord = next(delivery for delivery in db.deliveries if delivery.agent == 'discord')
+
+    assert gotify.delivered is False
+    assert gotify.error != ''
+    assert discord.delivered is True
+    assert discord.error == ''
+    assert db.events[0].delivered is True
+
+
 def test_settings_general_tab_is_default(monkeypatch):
     client, _store = make_client(monkeypatch)
 
@@ -1084,6 +1150,91 @@ def test_notification_template_save_persists_custom_event_templates(monkeypatch)
     assert store["gotify_new_book_body_template"] == "{author} | {library}"
 
 
+def test_notification_template_condition_includes_present_value():
+    template = "The newest thing{% if subtitle %}: {subtitle}{% endif %}"
+
+    rendered = render_notification_template(template, {"subtitle": "A Novel"})
+
+    assert rendered == "The newest thing: A Novel"
+
+
+def test_notification_template_condition_omits_empty_value():
+    template = "The newest thing{% if subtitle %}: {subtitle}{% endif %}"
+
+    rendered = render_notification_template(template, {"subtitle": ""})
+
+    assert rendered == "The newest thing"
+
+
+def test_notification_template_condition_supports_else():
+    template = "{% if subtitle %}{subtitle}{% else %}{title}{% endif %}"
+
+    with_subtitle = render_notification_template(
+        template,
+        {"title": "Example", "subtitle": "A Novel"},
+    )
+    without_subtitle = render_notification_template(
+        template,
+        {"title": "Example", "subtitle": ""},
+    )
+
+    assert with_subtitle == "A Novel"
+    assert without_subtitle == "Example"
+
+
+def test_notification_template_supports_multiple_conditional_blocks():
+    template = (
+        "{title}{% if subtitle %}: {subtitle}{% endif %}"
+        "{% if year %} ({year}){% endif %}"
+    )
+
+    rendered = render_notification_template(
+        template,
+        {"title": "Example", "subtitle": "A Novel", "year": "2026"},
+    )
+
+    assert rendered == "Example: A Novel (2026)"
+
+
+def test_notification_template_rejects_unknown_conditional_variable():
+    with pytest.raises(ValueError, match="Unknown notification variable"):
+        validate_notification_template("{% if missing %}{title}{% endif %}")
+
+
+def test_notification_template_rejects_nested_conditionals():
+    template = (
+        "{% if subtitle %}{subtitle}"
+        "{% if year %} ({year}){% endif %}"
+        "{% endif %}"
+    )
+
+    with pytest.raises(ValueError, match="cannot be nested"):
+        validate_notification_template(template)
+
+
+def test_notification_template_rejects_missing_endif():
+    with pytest.raises(ValueError, match="missing"):
+        validate_notification_template("{% if subtitle %}: {subtitle}")
+
+
+def test_notification_template_rejects_conditional_expressions():
+    with pytest.raises(ValueError, match="invalid conditional syntax"):
+        validate_notification_template("{% if subtitle == 'A Novel' %}{subtitle}{% endif %}")
+
+
+def test_notification_template_allows_escaped_braces_next_to_percent():
+    assert render_notification_template("50%}} off", {}) == "50%} off"
+    assert render_notification_template("literal {{% text", {}) == "literal {% text"
+    assert render_notification_template("{{x}}{% if subtitle %} {subtitle}{% endif %}", {"subtitle": "S"}) == "{x} S"
+
+
+def test_notification_template_still_rejects_dangling_conditional_delimiters():
+    with pytest.raises(ValueError, match="invalid conditional syntax"):
+        validate_notification_template("use {% for value")
+    with pytest.raises(ValueError, match="invalid conditional syntax"):
+        validate_notification_template("value %} here")
+
+
 def test_notification_template_save_rejects_unknown_variable(monkeypatch):
     client, store = make_client(monkeypatch)
 
@@ -1124,6 +1275,17 @@ def test_notification_settings_page_shows_template_variables(monkeypatch):
     assert "{itunes_id}" in response.text
     assert "{apple_podcasts_url}" in response.text
     assert "Number of books in a collection or series" in response.text
+    assert "Conditional formatting" in response.text
+    assert "Basic syntax" in response.text
+    assert "{% if variable %}text{% endif %}" in response.text
+    assert "Optional fallback" in response.text
+    assert "{% if variable %}text{% else %}fallback text{% endif %}" in response.text
+    assert "Example" in response.text
+    assert "{title}{% if subtitle %}: {subtitle}{% endif %}" in response.text
+    assert "The example displays <code>title: subtitle</code> when the subtitle is not blank and only <code>title</code> when it is blank." in response.text
+    assert "Replace <code>variable</code> with any available variable name without braces." in response.text
+    assert "{% if subtitle %}: {subtitle}{% endif %}" in response.text
+    assert "Conditions must be separate and cannot be placed inside one another." in response.text
     assert 'name="gotify_new_book_title_template"' in response.text
     assert 'name="gotify_new_book_body_template"' in response.text
 
