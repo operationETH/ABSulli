@@ -2214,6 +2214,7 @@ a.version-status-badge:hover { filter: brightness(1.12); }
   white-space: nowrap;
 }
 #api-regenerate-form,
+#rss-regenerate-form,
 #metrics-regenerate-form {
   display: none;
 }
@@ -2285,6 +2286,18 @@ a.version-status-badge:hover { filter: brightness(1.12); }
 }
 .settings-page .api-settings-form .settings-row:first-child {
   min-height: 62px;
+}
+.settings-page .api-settings-panel .api-toggle-row {
+  grid-template-columns: 1fr;
+}
+.settings-page .api-toggle {
+  margin: 0;
+}
+.settings-page .rss-feed-settings-panel .rss-feed-toggle-row {
+  grid-template-columns: 1fr;
+}
+.settings-page .rss-feed-toggle {
+  margin: 0;
 }
 .settings-page .api-key-control {
   width: 100%;

@@ -228,13 +228,13 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <div class="settings-list">
-      <div class="settings-row">
+      <div class="settings-row api-toggle-row">
         <div class="settings-row-copy">
-          <strong>Enable ABSulli API</strong>
+          <label class="settings-check api-toggle">
+            <input type="checkbox" name="api_enabled" {% if api_settings.enabled %}checked{% endif %} {% if api_settings.enabled_from_env %}disabled{% endif %}>
+            <strong>Enable ABSulli API</strong>
+          </label>
           {% if api_settings.enabled_from_env %}<div class="settings-row-badges"><em>Managed by .env</em></div>{% endif %}
-        </div>
-        <div class="settings-row-control">
-          <input type="checkbox" name="api_enabled" {% if api_settings.enabled %}checked{% endif %} {% if api_settings.enabled_from_env %}disabled{% endif %}>
         </div>
       </div>
 
@@ -279,6 +279,7 @@
   </form>
   {% endif %}
 </section>
+
 {% endif %}
 
 {% if settings_active_tab == 'notifications' %}
@@ -507,6 +508,68 @@
     </form>
   </div>
   {% endfor %}
+</section>
+
+<section class="panel api-settings-panel rss-feed-settings-panel">
+  <div class="panel-head">
+    <div>
+      <h2>RSS Feed</h2>
+    </div>
+    <span class="badge {{ 'good' if rss_feed.enabled else 'unknown' }}">{{ 'Enabled' if rss_feed.enabled else 'Disabled' }}</span>
+  </div>
+
+  <form class="settings-form api-settings-form" method="post" action="/settings/rss">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="settings-list">
+      <div class="settings-row rss-feed-toggle-row">
+        <div class="settings-row-copy">
+          <label class="settings-check rss-feed-toggle">
+            <input type="checkbox" name="rss_feed_enabled" {% if rss_feed.enabled %}checked{% endif %}>
+            <strong>Enable RSS Feed</strong>
+          </label>
+          <small>Shows the 100 most recently detected books, podcasts, and episodes.</small>
+        </div>
+      </div>
+
+      <div class="settings-row api-key-row">
+        <div class="settings-row-copy">
+          <strong>Private Feed URL</strong>
+          <small>Anyone with this URL can read the feed.</small>
+        </div>
+        <div class="settings-row-control api-key-control">
+          {% if rss_feed.url %}
+          <div class="api-key-input-group">
+            <input id="rss-feed-url" type="text" value="{{ '•' * 48 }}" data-rss-feed-value="{{ rss_feed.url }}" data-rss-feed-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="Private RSS feed URL">
+            <button type="button" class="secondary api-key-icon-button" data-rss-feed-toggle aria-label="Show RSS feed URL" title="Show RSS feed URL">
+              <svg class="api-key-icon api-key-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="api-key-icon api-key-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
+            </button>
+            <button type="button" class="secondary api-key-icon-button" data-rss-feed-copy aria-label="Copy RSS feed URL" title="Copy RSS feed URL">
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            </button>
+            <button type="submit" class="secondary api-key-icon-button" form="rss-regenerate-form" data-rss-feed-regenerate aria-label="Regenerate RSS feed URL" title="Regenerate RSS feed URL">
+              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
+            </button>
+          </div>
+          <small id="rss-feed-copy-status" hidden>Copied.</small>
+          {% else %}
+          <small>Enable the feed and save to generate its private URL.</small>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions api-form-actions">
+      <button type="submit">Save Changes</button>
+    </div>
+  </form>
+
+  {% if rss_feed.token %}
+  <form id="rss-regenerate-form" method="post" action="/settings/rss/regenerate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  </form>
+  {% endif %}
 </section>
 {% endif %}
 

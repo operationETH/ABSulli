@@ -8,6 +8,7 @@
   <a href="https://hub.docker.com/r/operationeth/absulli"><img alt="Docker Hub Pulls" src="https://img.shields.io/docker/pulls/operationeth/absulli?label=Docker%20Hub%20pulls&logo=docker"></a>
   <a href="https://github.com/operationETH/ABSulli/pkgs/container/absulli"><img alt="GHCR Pulls" src="https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/operationETH/ABSulli/absulli&query=downloadCount&label=GHCR%20pulls&logo=github&color=blue"></a>
   <a href="https://ca.unraid.net/apps/absulli-08kx2l31cthp3f"><img alt="Unraid Community Apps" src="https://img.shields.io/badge/Unraid-Community%20Apps-F15A2C?logo=unraid&logoColor=white"></a>
+  <a href="https://discord.gg/qvVyfjBuwv"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white"></a>
 </p>
 
 ---
@@ -29,6 +30,7 @@ ABSulli is an [Audiobookshelf](https://github.com/advplyr/audiobookshelf) compan
 - Listening history
 - Built-in graphs and Prometheus metrics endpoint
 - Notification support (Gotify, ntfy, Discord, Slack, Telegram, Pushover, Pushbullet, Email, Webhook)
+- Private RSS feed for newly added media
 - Local SQLite storage - no external database
 - Built-in login with rate limiting and audit logging
 
@@ -105,6 +107,19 @@ When these are set, the setup wizard shows them as read-only and uses them autom
 ABSulli exposes Prometheus metrics at `/metrics`. This can be scraped by Prometheus for Grafana dashboards or external monitoring.
 
 If you configure a metrics token, include it as a bearer token or with the `X-Absulli-Metrics-Token` header. The metrics token can be configured in Settings → Network.
+
+---
+
+## RSS feed
+
+ABSulli can provide a private RSS feed containing new books, podcasts, and podcast episodes detected after the feed is enabled. Open **Settings → Notifications**, enable the RSS feed, save the settings, and copy the generated URL into your feed reader.
+
+The feed contains up to 100 of the most recently detected books, podcasts, and podcast episodes. Anyone with the URL can read it without signing in to ABSulli. Disabling the feed blocks access. Regenerating the URL immediately invalidates the previous one.
+
+Set the ABSulli Public URL under **Settings → Network** when the generated feed URL should use a reverse proxy address.
+
+> [!NOTE]
+> The RSS feed must be reachable by the RSS reader. Remote readers may require a VPN, reverse proxy, or other external access configuration.
 
 ---
 

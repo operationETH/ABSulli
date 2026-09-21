@@ -1103,6 +1103,48 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  const rssToggle = event.target.closest('[data-rss-feed-toggle]');
+  if (rssToggle) {
+    const input = document.getElementById('rss-feed-url');
+    if (!input) return;
+    const masked = input.dataset.rssFeedMasked !== 'false';
+    const nextMasked = !masked;
+    input.value = nextMasked ? '•'.repeat(48) : (input.dataset.rssFeedValue || '');
+    input.dataset.rssFeedMasked = nextMasked ? 'true' : 'false';
+    const showIcon = rssToggle.querySelector('.api-key-icon-show');
+    const hideIcon = rssToggle.querySelector('.api-key-icon-hide');
+    if (showIcon) showIcon.hidden = !nextMasked;
+    if (hideIcon) hideIcon.hidden = nextMasked;
+    const label = nextMasked ? 'Show RSS feed URL' : 'Hide RSS feed URL';
+    rssToggle.setAttribute('aria-label', label);
+    rssToggle.setAttribute('title', label);
+    return;
+  }
+
+  const rssCopy = event.target.closest('[data-rss-feed-copy]');
+  if (rssCopy) {
+    const input = document.getElementById('rss-feed-url');
+    const status = document.getElementById('rss-feed-copy-status');
+    if (!input) return;
+    try {
+      await copyTextToClipboard(input.dataset.rssFeedValue || '');
+      if (status) status.textContent = 'Copied.';
+    } catch {
+      if (status) status.textContent = 'Copy failed.';
+    }
+    if (status) {
+      status.hidden = false;
+      window.setTimeout(() => { status.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  const rssRegenerate = event.target.closest('[data-rss-feed-regenerate]');
+  if (rssRegenerate && !window.confirm('Regenerate the RSS feed URL? Readers using the current URL will stop working.')) {
+    event.preventDefault();
+    return;
+  }
+
   const metricsToggle = event.target.closest('[data-metrics-token-toggle]');
   if (metricsToggle) {
     const input = document.getElementById('metrics-token');

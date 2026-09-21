@@ -2,12 +2,14 @@ from datetime import timedelta
 import hashlib
 import json
 import logging
+from pathlib import Path
 import re
+import secrets
 from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import and_, desc, exists, func, or_
 from sqlalchemy.orm import Session
 
@@ -123,6 +125,9 @@ from absulli.web.settings import (
     notification_library_value_from_form,
     regenerate_api_token,
     regenerate_metrics_token,
+    regenerate_rss_feed_token,
+    rss_feed_context,
+    rss_feed_values_from_form,
     settings_field_from_env,
     settings_tab_context,
     user_settings_context_fields,
@@ -132,6 +137,15 @@ from absulli.web.settings import (
     about_settings_context,
     about_data_context,
     field_from_env,
+)
+from absulli.web.rss import (
+    RSS_DELIVERY_AGENT,
+    RSS_EVENT_TYPES,
+    RSS_ENTRY_LIMIT,
+    RSS_FEED_ENABLED_SETTING,
+    RSS_FEED_TOKEN_SETTING,
+    build_rss_feed,
+    rss_setting_enabled,
 )
 
 
@@ -269,7 +283,55 @@ def safe_next_url(value: str | None) -> str:
 
 @router.get("/favicon.ico")
 def favicon():
-    return Response(status_code=204)
+    return FileResponse(
+        Path(__file__).resolve().parent / "static" / "img" / "logo-mark.png",
+        media_type="image/png",
+    )
+
+
+@router.get("/feeds/new-media/{token}.xml")
+def new_books_rss_feed(token: str, request: Request, db: Session = Depends(get_db)):
+    enabled = rss_setting_enabled(get_setup_setting(RSS_FEED_ENABLED_SETTING, "false"))
+    expected = get_setup_setting(RSS_FEED_TOKEN_SETTING, "").strip()
+    if (
+        not enabled
+        or not expected
+        or not secrets.compare_digest(token.encode("utf-8"), expected.encode("utf-8"))
+    ):
+        raise HTTPException(status_code=404, detail="Feed not found")
+
+    events = (
+        db.query(NotificationEvent)
+        .join(NotificationDelivery, NotificationDelivery.event_id == NotificationEvent.id)
+        .filter(
+            NotificationEvent.event_type.in_(RSS_EVENT_TYPES),
+            NotificationDelivery.agent == RSS_DELIVERY_AGENT,
+            NotificationDelivery.delivered.is_(True),
+        )
+        .order_by(NotificationEvent.created_at.desc(), NotificationEvent.id.desc())
+        .limit(RSS_ENTRY_LIMIT)
+        .all()
+    )
+    settings = get_settings()
+    public_url = (
+        settings.effective_setting("public_url").strip().rstrip("/")
+        or str(request.base_url).rstrip("/")
+    )
+    feed_url = f"{public_url}/feeds/new-media/{quote(token, safe='')}.xml"
+    content = build_rss_feed(
+        events,
+        feed_url=feed_url,
+        public_url=public_url,
+        abs_url=settings.effective_abs_url,
+    )
+    return Response(
+        content=content,
+        media_type="application/rss+xml",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )
 
 
 
@@ -1409,6 +1471,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "general_fields": general_settings_context(settings),
             "network_fields": network_settings_context(settings),
             "api_settings": api_settings_context(settings),
+            "rss_feed": rss_feed_context(settings, str(request.base_url)),
             "gotify": gotify_settings_context(settings),
             "notification_agents": agent_context,
             "settings_saved": bool(request.query_params.get("saved")),
@@ -1475,6 +1538,28 @@ async def settings_api_regenerate(request: Request):
     except ValueError as exc:
         return RedirectResponse(f"/settings?tab=api&error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+
+
+@router.post("/settings/rss", response_class=HTMLResponse)
+async def settings_rss_save(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    set_setup_settings(rss_feed_values_from_form(form))
+    return RedirectResponse("/settings?tab=notifications&saved=rss", status_code=303)
+
+
+@router.post("/settings/rss/regenerate", response_class=HTMLResponse)
+async def settings_rss_regenerate(request: Request):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+
+    regenerate_rss_feed_token()
+    return RedirectResponse("/settings?tab=notifications&saved=rss", status_code=303)
 
 
 @router.post("/settings/network/metrics-token/regenerate", response_class=HTMLResponse)
@@ -1794,7 +1879,10 @@ def notifications(request: Request, db: Session = Depends(get_db)):
             delivery_map.setdefault(delivery.event_id, []).append(
                 {
                     "agent": delivery.agent,
-                    "label": AGENT_FIELD_CONFIGS.get(delivery.agent, {}).get("label", delivery.agent),
+                    "label": AGENT_FIELD_CONFIGS.get(delivery.agent, {}).get(
+                        "label",
+                        "RSS" if delivery.agent == RSS_DELIVERY_AGENT else delivery.agent,
+                    ),
                     "delivered": delivery.delivered,
                     "error": clean_notification_error(delivery.error),
                 }
@@ -1812,7 +1900,10 @@ def notifications(request: Request, db: Session = Depends(get_db)):
     agent_options = [
         {
             "value": value,
-            "label": AGENT_FIELD_CONFIGS.get(value, {}).get("label", value),
+            "label": AGENT_FIELD_CONFIGS.get(value, {}).get(
+                "label",
+                "RSS" if value == RSS_DELIVERY_AGENT else value,
+            ),
         }
         for value in agent_values
     ]
