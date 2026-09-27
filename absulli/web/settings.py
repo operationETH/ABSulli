@@ -34,7 +34,7 @@ HISTORY_PAGE_SIZE_SETTING = "history_page_size"
 HISTORY_PAGE_SIZE_COOKIE = "absulli_history_page_size"
 DEFAULT_HISTORY_PAGE_SIZE = 25
 
-SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "api", "about")
+SETTINGS_TAB_IDS = ("general", "network", "users", "notifications", "jobs", "about")
 
 
 def clean_settings_tab(value: object) -> str:
@@ -48,7 +48,7 @@ def settings_tab_context(active_tab: str) -> list[dict[str, str]]:
         "network": "Network",
         "users": "Users",
         "notifications": "Notifications",
-        "api": "API",
+        "jobs": "Jobs",
         "about": "About",
     }
     return [{"id": tab_id, "label": labels[tab_id]} for tab_id in SETTINGS_TAB_IDS]
@@ -316,8 +316,6 @@ GENERAL_FIELD_CONFIGS = [
     {"name": "abs_api_key", "label": "Audiobookshelf API Key", "type": "password", "required": True, "placeholder": ""},
     {"name": "abs_verify_ssl", "label": "Verify SSL Certificates", "type": "checkbox", "required": False, "default": True},
     {"name": "abs_request_timeout", "label": "Request Timeout", "type": "number", "required": True, "placeholder": "15"},
-    {"name": "abs_poll_interval", "label": "Activity Poll Interval", "type": "number", "required": True, "placeholder": "15"},
-    {"name": "abs_history_poll_interval", "label": "History Poll Interval", "type": "number", "required": True, "placeholder": "300"},
 ]
 
 NETWORK_FIELD_CONFIGS = [
@@ -719,8 +717,6 @@ def general_values_from_form(settings, form) -> dict[str, str]:
     if not values.get("abs_api_key") or values.get("abs_api_key") == "change_me":
         raise ValueError("Audiobookshelf API key is required")
     values["abs_request_timeout"] = clean_int_range(values.get("abs_request_timeout", ""), "Request timeout", 1, 300)
-    values["abs_poll_interval"] = clean_int_range(values.get("abs_poll_interval", ""), "Activity poll interval", 3, 3600)
-    values["abs_history_poll_interval"] = clean_int_range(values.get("abs_history_poll_interval", ""), "History poll interval", 60, 86400)
     return values
 
 

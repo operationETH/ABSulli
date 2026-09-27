@@ -26,7 +26,7 @@
   <div class="panel-head">
     <div>
       <h2>Audiobookshelf Connection</h2>
-      <p>Configure the Audiobookshelf connection and polling intervals.</p>
+      <p>Configure the Audiobookshelf connection.</p>
     </div>
   </div>
   <form id="general-settings-form" class="settings-form" method="post" action="/settings/general">
@@ -215,7 +215,7 @@
 {% endif %}
 
 
-{% if settings_active_tab == 'api' %}
+{% if settings_active_tab == 'general' %}
 <section class="panel api-settings-panel">
   <div class="panel-head">
     <div>
@@ -570,6 +570,49 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>
   {% endif %}
+</section>
+{% endif %}
+
+{% if settings_active_tab == 'jobs' %}
+<section class="panel jobs-panel" data-jobs-panel data-csrf-token="{{ csrf_token }}">
+  <div class="panel-head">
+    <div>
+      <h2>Jobs</h2>
+      <p>View and manage ABSulli background tasks. A disabled Edit button means the schedule is managed by an environment variable.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table jobs-table">
+      <thead>
+        <tr>
+          <th>Job</th>
+          <th>Schedule</th>
+          <th>Last Run</th>
+          <th>Result</th>
+          <th>Next Run</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody data-jobs-body>
+        <tr><td colspan="7" class="empty">Loading jobs...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="jobs-message" data-jobs-message hidden></div>
+  <dialog class="library-manage-dialog jobs-schedule-dialog" data-job-schedule-dialog aria-labelledby="job-schedule-title">
+    <div class="library-manage-dialog-head">
+      <h3 id="job-schedule-title" data-job-schedule-title>Edit Schedule</h3>
+      <button class="library-manage-close" type="button" data-job-schedule-close aria-label="Close">&times;</button>
+    </div>
+    <form class="jobs-schedule-form" data-job-schedule-form>
+      <div class="jobs-schedule-options" data-job-schedule-options></div>
+      <div class="jobs-schedule-actions">
+        <button type="button" class="secondary" data-job-schedule-close>Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
 </section>
 {% endif %}
 

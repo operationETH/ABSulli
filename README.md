@@ -76,7 +76,7 @@ Then open **http://\<server-ip\>:8272** and follow the setup wizard.
 
 The wizard will ask for your Audiobookshelf URL and API key, create an admin login, and immediately start importing your data. No `.env` file required.
 
-After setup, all connection and notification settings can be managed from the **Settings** page.
+After setup, application settings can be managed from the **Settings** page.
 
 ---
 

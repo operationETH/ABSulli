@@ -246,8 +246,8 @@ def test_rss_settings_generate_and_regenerate_global_url(monkeypatch):
     assert page.text.index("Message Templates") < page.text.index("<h2>RSS Feed</h2>")
     assert f"/feeds/new-media/{original_token}.xml" in page.text
 
-    api_page = client.get("/settings?tab=api")
-    assert "rss-feed-settings-panel" not in api_page.text
+    general_page = client.get("/settings?tab=general")
+    assert "rss-feed-settings-panel" not in general_page.text
 
     regenerated = client.post(
         "/settings/rss/regenerate",

@@ -36,14 +36,15 @@ def make_client(monkeypatch, store=None):
     return TestClient(app), store
 
 
-def test_api_tab_does_not_generate_key_while_disabled(monkeypatch):
+def test_general_tab_does_not_generate_api_key_while_disabled(monkeypatch):
     client, store = make_client(monkeypatch)
 
-    response = client.get("/settings?tab=api")
+    response = client.get("/settings?tab=general")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert "API Access" in response.text
+    assert 'href="/settings?tab=api"' not in response.text
     assert 'name="api_enabled"' in response.text
     assert 'id="absulli-api-key"' not in response.text
     assert "Enable the API and save to generate a key." in response.text
@@ -95,7 +96,7 @@ def test_api_regenerate_replaces_saved_key(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/settings?tab=api&saved=api"
+    assert response.headers["location"] == "/settings?tab=general&saved=api"
     assert store["api_token"] != "old-key"
     assert len(store["api_token"]) >= 32
 
@@ -109,7 +110,7 @@ def test_api_environment_values_are_read_only(monkeypatch):
     monkeypatch.setenv("ABSULLI_API_KEY", "environment-key")
     get_settings.cache_clear()
 
-    page = client.get("/settings?tab=api")
+    page = client.get("/settings?tab=general")
     assert page.status_code == 200
     assert "environment-key" in page.text
     assert "Managed by .env" in page.text

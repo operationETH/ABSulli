@@ -65,16 +65,22 @@ def test_general_settings_tab_renders_editable_audiobookshelf_fields(monkeypatch
     assert 'readonly' not in response.text.split('id="abs-api-key"', 1)[1].split('>', 1)[0]
     assert 'name="abs_request_timeout"' in response.text
     assert 'value="22"' in response.text
-    assert 'name="abs_poll_interval"' in response.text
-    assert 'value="20"' in response.text
-    assert 'name="abs_history_poll_interval"' in response.text
-    assert 'value="360"' in response.text
+    assert 'name="abs_poll_interval"' not in response.text
+    assert 'name="abs_history_poll_interval"' not in response.text
+    assert "API Access" in response.text
     assert "general-settings-grid" in response.text
     assert "ABSULLI_VERSION" not in response.text
 
 
 def test_general_settings_save_persists_values_and_keeps_blank_api_key(monkeypatch):
-    client, store = make_client(monkeypatch, {"abs_api_key": "saved-key"})
+    client, store = make_client(
+        monkeypatch,
+        {
+            "abs_api_key": "saved-key",
+            "abs_poll_interval": "25",
+            "abs_history_poll_interval": "600",
+        },
+    )
 
     response = client.post(
         "/settings/general",
@@ -83,8 +89,6 @@ def test_general_settings_save_persists_values_and_keeps_blank_api_key(monkeypat
             "abs_url": " http://new-abs:13378/ ",
             "abs_api_key": "",
             "abs_request_timeout": "30",
-            "abs_poll_interval": "25",
-            "abs_history_poll_interval": "600",
         },
         follow_redirects=False,
     )
@@ -109,28 +113,24 @@ def test_general_settings_save_rejects_invalid_values(monkeypatch):
             "abs_url": "abs:13378",
             "abs_api_key": "saved-key",
             "abs_request_timeout": "15",
-            "abs_poll_interval": "15",
-            "abs_history_poll_interval": "300",
         },
         follow_redirects=False,
     )
     assert bad_url.status_code == 303
     assert "error=Audiobookshelf%20URL%20must%20start" in bad_url.headers["location"]
 
-    bad_interval = client.post(
+    bad_timeout = client.post(
         "/settings/general",
         data={
             "csrf_token": "valid-token",
             "abs_url": "http://abs:13378",
             "abs_api_key": "saved-key",
-            "abs_request_timeout": "15",
-            "abs_poll_interval": "2",
-            "abs_history_poll_interval": "300",
+            "abs_request_timeout": "0",
         },
         follow_redirects=False,
     )
-    assert bad_interval.status_code == 303
-    assert "Activity%20poll%20interval%20must%20be%20between%203%20and%203600" in bad_interval.headers["location"]
+    assert bad_timeout.status_code == 303
+    assert "Request%20timeout%20must%20be%20between%201%20and%20300" in bad_timeout.headers["location"]
     assert store == {"abs_api_key": "saved-key"}
 
 
@@ -166,8 +166,6 @@ def test_general_settings_env_values_win_over_saved_settings(monkeypatch):
             "abs_api_key": "form-key",
             "abs_verify_ssl": "on",
             "abs_request_timeout": "33",
-            "abs_poll_interval": "30",
-            "abs_history_poll_interval": "900",
         },
         follow_redirects=False,
     )
@@ -205,8 +203,6 @@ def test_general_connection_test_uses_unsaved_form_values(monkeypatch):
             "abs_api_key": "form-key",
             "abs_verify_ssl": "on",
             "abs_request_timeout": "15",
-            "abs_poll_interval": "15",
-            "abs_history_poll_interval": "300",
         },
     )
 

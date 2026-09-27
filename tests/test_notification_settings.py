@@ -753,6 +753,8 @@ def test_settings_general_tab_is_default(monkeypatch):
     assert 'href="/settings?tab=network"' in response.text
     assert 'href="/settings?tab=users"' in response.text
     assert 'href="/settings?tab=notifications"' in response.text
+    assert 'href="/settings?tab=jobs"' in response.text
+    assert 'href="/settings?tab=api"' not in response.text
     assert 'href="/settings?tab=about"' in response.text
     assert '<h2>Audiobookshelf Connection</h2>' in response.text
     assert 'Notification Settings' not in response.text

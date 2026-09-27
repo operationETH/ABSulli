@@ -1486,6 +1486,59 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
     return response
 
 
+@router.get("/api/v1/jobs", response_class=JSONResponse)
+def jobs_status(request: Request):
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler is not available.")
+    return {"jobs": scheduler.jobs()}
+
+
+@router.post("/api/v1/jobs/{job_id}/run", response_class=JSONResponse)
+async def jobs_run(request: Request, job_id: str):
+    csrf_token = request.headers.get("X-CSRF-Token", "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings session expired. Refresh and try again.")
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler is not available.")
+    try:
+        started = scheduler.run_now(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if not started:
+        raise HTTPException(status_code=409, detail="Job is already running.")
+    return {"started": True, "job_id": job_id}
+
+
+@router.post("/api/v1/jobs/{job_id}/schedule", response_class=JSONResponse)
+async def jobs_schedule(request: Request, job_id: str):
+    csrf_token = request.headers.get("X-CSRF-Token", "")
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Your settings session expired. Refresh and try again.")
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler is not available.")
+    try:
+        payload = await request.json()
+        interval_seconds = payload.get("interval_seconds")
+        if not isinstance(interval_seconds, int) or isinstance(interval_seconds, bool):
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Select a valid schedule option.")
+    try:
+        job = scheduler.update_schedule(job_id, interval_seconds)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    except PermissionError:
+        raise HTTPException(status_code=409, detail="This schedule is managed by an environment variable.")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"updated": True, "job": job}
+
+
 @router.post("/settings/users", response_class=HTMLResponse)
 async def settings_users_save(request: Request):
     form = await request.form()
@@ -1522,7 +1575,7 @@ async def settings_api_save(request: Request):
     values = api_values_from_form(settings, form)
     if values:
         set_setup_settings(values)
-    return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+    return RedirectResponse("/settings?tab=general&saved=api", status_code=303)
 
 
 @router.post("/settings/api/regenerate", response_class=HTMLResponse)
@@ -1536,8 +1589,8 @@ async def settings_api_regenerate(request: Request):
     try:
         regenerate_api_token(settings)
     except ValueError as exc:
-        return RedirectResponse(f"/settings?tab=api&error={quote(str(exc))}", status_code=303)
-    return RedirectResponse("/settings?tab=api&saved=api", status_code=303)
+        return RedirectResponse(f"/settings?tab=general&error={quote(str(exc))}", status_code=303)
+    return RedirectResponse("/settings?tab=general&saved=api", status_code=303)
 
 
 @router.post("/settings/rss", response_class=HTMLResponse)
