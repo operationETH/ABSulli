@@ -44,6 +44,10 @@ MISSING_COLUMN_SQL = {
         "device_name": "ALTER TABLE listening_history ADD COLUMN device_name VARCHAR(255) DEFAULT ''",
         "model": "ALTER TABLE listening_history ADD COLUMN model VARCHAR(255) DEFAULT ''",
     },
+    "notification_events": {
+        "library_id": "ALTER TABLE notification_events ADD COLUMN library_id VARCHAR(128) DEFAULT ''",
+        "context_json": "ALTER TABLE notification_events ADD COLUMN context_json TEXT DEFAULT ''",
+    },
 }
 
 

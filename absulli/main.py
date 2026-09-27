@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
     if settings.effective_api_enabled and not settings.effective_api_token:
         ensure_api_token()
     prune_cover_cache(settings.data_dir)
+    app.state.scheduler = scheduler
     scheduler.start()
     yield
     await scheduler.shutdown()

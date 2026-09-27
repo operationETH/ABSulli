@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     abs_request_timeout: int = Field(default=15, alias="ABS_REQUEST_TIMEOUT")
     abs_poll_interval: int = Field(default=15, alias="ABS_POLL_INTERVAL")
     abs_history_poll_interval: int = Field(default=300, alias="ABS_HISTORY_POLL_INTERVAL")
+    login_log_cleanup_interval: int = Field(default=86400, alias="ABSULLI_LOGIN_LOG_CLEANUP_INTERVAL")
+    update_check_interval: int = Field(default=21600, alias="ABSULLI_UPDATE_CHECK_INTERVAL")
 
     gotify_url: str = Field(default="", alias="GOTIFY_URL")
     gotify_token: str = Field(default="", alias="GOTIFY_TOKEN")
@@ -319,6 +321,14 @@ class Settings(BaseSettings):
     @property
     def effective_abs_history_poll_interval(self) -> int:
         return self.effective_int_setting("abs_history_poll_interval", default=300, minimum=60, maximum=86400)
+
+    @property
+    def effective_login_log_cleanup_interval(self) -> int:
+        return self.effective_int_setting("login_log_cleanup_interval", default=86400, minimum=3600, maximum=604800)
+
+    @property
+    def effective_update_check_interval(self) -> int:
+        return self.effective_int_setting("update_check_interval", default=21600, minimum=21600, maximum=86400)
 
     @property
     def gotify_url_from_env(self) -> bool:

@@ -354,7 +354,8 @@ def test_favicon_request_does_not_redirect_or_rotate_csrf(monkeypatch):
     assert original_csrf
 
     favicon_response = client.get("/favicon.ico", follow_redirects=False)
-    assert favicon_response.status_code == 204
+    assert favicon_response.status_code == 200
+    assert favicon_response.headers["content-type"].startswith("image/png")
     assert "location" not in favicon_response.headers
     assert "set-cookie" not in favicon_response.headers
     assert client.cookies.get("absulli_csrf") == original_csrf
@@ -508,7 +509,8 @@ def test_setup_mode_allows_favicon_and_healthz_without_redirect_or_csrf_rotation
     assert original_csrf
 
     favicon_response = client.get("/favicon.ico", follow_redirects=False)
-    assert favicon_response.status_code == 204
+    assert favicon_response.status_code == 200
+    assert favicon_response.headers["content-type"].startswith("image/png")
     assert "location" not in favicon_response.headers
     assert "set-cookie" not in favicon_response.headers
     assert client.cookies.get("absulli_csrf") == original_csrf

@@ -1,6 +1,9 @@
 const LIVE_ACTIVITY_REFRESH_MS = 15000;
 let liveActivityRows = [];
 let liveActivityTimer = null;
+let jobsRefreshTimer = null;
+let jobRows = new Map();
+let jobScheduleTarget = null;
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -16,6 +19,139 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString();
+}
+
+function formatTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleTimeString();
+}
+
+function formatRelativeTime(value) {
+  if (!value) return 'Not scheduled';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const absoluteSeconds = Math.abs(seconds);
+  const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  const direction = seconds < 0 ? -1 : 1;
+  if (absoluteSeconds < 2) return 'now';
+  if (absoluteSeconds < 60) return formatter.format(direction * absoluteSeconds, 'second');
+  if (absoluteSeconds < 3600) return formatter.format(direction * Math.round(absoluteSeconds / 60), 'minute');
+  if (absoluteSeconds < 86400) return formatter.format(direction * Math.round(absoluteSeconds / 3600), 'hour');
+  return formatter.format(direction * Math.round(absoluteSeconds / 86400), 'day');
+}
+
+function jobStatusClass(status) {
+  if (status === 'successful') return 'good';
+  if (status === 'failed') return 'failed';
+  if (status === 'running') return 'running';
+  return 'unknown';
+}
+
+function renderJobs(jobs) {
+  const body = document.querySelector('[data-jobs-body]');
+  if (!body) return;
+  jobRows = new Map(jobs.map((job) => [job.id, job]));
+  body.innerHTML = jobs.map((job) => {
+    const status = job.running ? 'running' : (job.last_status || 'idle');
+    const result = job.last_error || job.last_result || 'Not run yet';
+    return `<tr>
+      <td><strong>${escapeHtml(job.name)}</strong></td>
+      <td>${escapeHtml(job.schedule)}</td>
+      <td title="${escapeHtml(job.last_finished_at ? formatDateTime(job.last_finished_at) : '')}">${escapeHtml(job.last_finished_at ? formatTime(job.last_finished_at) : 'Never')}</td>
+      <td title="${escapeHtml(result)}">${escapeHtml(result)}</td>
+      <td title="${escapeHtml(job.next_run_at ? formatDateTime(job.next_run_at) : '')}">${escapeHtml(formatRelativeTime(job.next_run_at))}</td>
+      <td><span class="badge jobs-status ${jobStatusClass(status)}">${escapeHtml(status)}</span></td>
+      <td><div class="jobs-actions"><button type="button" class="secondary${job.schedule_editable ? '' : ' jobs-edit-env'}" data-job-edit="${escapeHtml(job.id)}" ${job.schedule_editable ? '' : 'disabled title="This schedule is managed by an environment variable."'}>Edit</button><button type="button" class="secondary" data-job-run="${escapeHtml(job.id)}" ${job.running ? 'disabled' : ''}>Run Now</button></div></td>
+    </tr>`;
+  }).join('');
+}
+
+function openJobSchedule(jobId) {
+  const job = jobRows.get(jobId);
+  const dialog = document.querySelector('[data-job-schedule-dialog]');
+  const title = dialog?.querySelector('[data-job-schedule-title]');
+  const options = dialog?.querySelector('[data-job-schedule-options]');
+  if (!job || !job.schedule_editable || !dialog || !options) return;
+  jobScheduleTarget = job.id;
+  if (title) title.textContent = `${job.name} Schedule`;
+  options.innerHTML = (job.schedule_options || []).map((option) => `<label class="jobs-schedule-option">
+    <input type="radio" name="job_schedule_interval" value="${escapeHtml(option.seconds)}" ${option.current ? 'checked' : ''}>
+    <span>${escapeHtml(option.label)}</span>
+    ${option.recommended ? '<em>Recommended</em>' : ''}
+    ${option.current && !option.recommended ? '<small>Current</small>' : ''}
+  </label>`).join('');
+  dialog.showModal();
+}
+
+async function saveJobSchedule(intervalSeconds) {
+  const panel = document.querySelector('[data-jobs-panel]');
+  const message = panel?.querySelector('[data-jobs-message]');
+  const csrfToken = panel?.dataset.csrfToken || '';
+  const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobScheduleTarget || '')}/schedule`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrfToken,
+    },
+    body: JSON.stringify({ interval_seconds: Number(intervalSeconds) }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || 'Unable to update the schedule.');
+  if (message) {
+    message.textContent = 'Schedule updated.';
+    message.classList.remove('warn');
+    message.hidden = false;
+  }
+  document.querySelector('[data-job-schedule-dialog]')?.close();
+  await refreshJobs();
+}
+
+async function refreshJobs() {
+  const panel = document.querySelector('[data-jobs-panel]');
+  if (!panel) return;
+  const message = panel.querySelector('[data-jobs-message]');
+  try {
+    const response = await fetch('/api/v1/jobs', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Unable to load jobs.');
+    const data = await response.json();
+    renderJobs(data.jobs || []);
+    if (message) message.hidden = true;
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message || 'Unable to load jobs.';
+      message.classList.add('warn');
+      message.hidden = false;
+    }
+  }
+}
+
+async function runJob(jobId) {
+  const panel = document.querySelector('[data-jobs-panel]');
+  const message = panel?.querySelector('[data-jobs-message]');
+  const csrfToken = panel?.dataset.csrfToken || '';
+  try {
+    const response = await fetch(`/api/v1/jobs/${encodeURIComponent(jobId)}/run`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Unable to run job.');
+    if (message) {
+      message.textContent = 'Job started.';
+      message.classList.remove('warn');
+      message.hidden = false;
+    }
+    await refreshJobs();
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message || 'Unable to run job.';
+      message.classList.add('warn');
+      message.hidden = false;
+    }
+  }
 }
 
 function formatDuration(seconds) {
@@ -906,6 +1042,11 @@ function initializeNotificationAgentTabs(root = document) {
 
 initializeNotificationAgentTabs();
 
+if (document.querySelector('[data-jobs-panel]')) {
+  refreshJobs();
+  jobsRefreshTimer = window.setInterval(refreshJobs, 5000);
+}
+
 document.addEventListener('click', (event) => {
   const openButton = event.target.closest('[data-library-manage-open]');
   if (openButton) {
@@ -964,6 +1105,25 @@ document.addEventListener('focusin', (event) => {
 });
 
 document.addEventListener('click', async (event) => {
+  const jobEdit = event.target.closest('[data-job-edit]');
+  if (jobEdit) {
+    openJobSchedule(jobEdit.dataset.jobEdit || '');
+    return;
+  }
+
+  const jobScheduleClose = event.target.closest('[data-job-schedule-close]');
+  if (jobScheduleClose) {
+    jobScheduleClose.closest('[data-job-schedule-dialog]')?.close();
+    return;
+  }
+
+  const jobRun = event.target.closest('[data-job-run]');
+  if (jobRun) {
+    jobRun.disabled = true;
+    await runJob(jobRun.dataset.jobRun || '');
+    return;
+  }
+
   const templateVariable = event.target.closest('[data-template-variable]');
   if (templateVariable) {
     const form = templateVariable.closest('form');
@@ -1103,6 +1263,48 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  const rssToggle = event.target.closest('[data-rss-feed-toggle]');
+  if (rssToggle) {
+    const input = document.getElementById('rss-feed-url');
+    if (!input) return;
+    const masked = input.dataset.rssFeedMasked !== 'false';
+    const nextMasked = !masked;
+    input.value = nextMasked ? '•'.repeat(48) : (input.dataset.rssFeedValue || '');
+    input.dataset.rssFeedMasked = nextMasked ? 'true' : 'false';
+    const showIcon = rssToggle.querySelector('.api-key-icon-show');
+    const hideIcon = rssToggle.querySelector('.api-key-icon-hide');
+    if (showIcon) showIcon.hidden = !nextMasked;
+    if (hideIcon) hideIcon.hidden = nextMasked;
+    const label = nextMasked ? 'Show RSS feed URL' : 'Hide RSS feed URL';
+    rssToggle.setAttribute('aria-label', label);
+    rssToggle.setAttribute('title', label);
+    return;
+  }
+
+  const rssCopy = event.target.closest('[data-rss-feed-copy]');
+  if (rssCopy) {
+    const input = document.getElementById('rss-feed-url');
+    const status = document.getElementById('rss-feed-copy-status');
+    if (!input) return;
+    try {
+      await copyTextToClipboard(input.dataset.rssFeedValue || '');
+      if (status) status.textContent = 'Copied.';
+    } catch {
+      if (status) status.textContent = 'Copy failed.';
+    }
+    if (status) {
+      status.hidden = false;
+      window.setTimeout(() => { status.hidden = true; }, 2000);
+    }
+    return;
+  }
+
+  const rssRegenerate = event.target.closest('[data-rss-feed-regenerate]');
+  if (rssRegenerate && !window.confirm('Regenerate the RSS feed URL? Readers using the current URL will stop working.')) {
+    event.preventDefault();
+    return;
+  }
+
   const metricsToggle = event.target.closest('[data-metrics-token-toggle]');
   if (metricsToggle) {
     const input = document.getElementById('metrics-token');
@@ -1158,6 +1360,28 @@ document.addEventListener('click', async (event) => {
   const metricsRegenerate = event.target.closest('[data-metrics-token-regenerate]');
   if (metricsRegenerate && !window.confirm('Regenerate the metrics token? Prometheus clients using the current token will stop working.')) {
     event.preventDefault();
+  }
+});
+
+document.querySelector('[data-job-schedule-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const selected = form.querySelector('input[name="job_schedule_interval"]:checked');
+  const submit = form.querySelector('button[type="submit"]');
+  if (!selected) return;
+  submit.disabled = true;
+  try {
+    await saveJobSchedule(selected.value);
+  } catch (error) {
+    const panel = document.querySelector('[data-jobs-panel]');
+    const message = panel?.querySelector('[data-jobs-message]');
+    if (message) {
+      message.textContent = error.message || 'Unable to update the schedule.';
+      message.classList.add('warn');
+      message.hidden = false;
+    }
+  } finally {
+    submit.disabled = false;
   }
 });
 

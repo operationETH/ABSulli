@@ -11,6 +11,12 @@ from absulli.core.security import notification_cover_token
 import absulli.core.setup_state as setup_state
 from absulli.database.models import NotificationDelivery, NotificationEvent
 from absulli.notifiers.agents import DiscordAgent, EmailAgent, GotifyAgent, NtfyAgent, PushbulletAgent, PushoverAgent, SlackAgent, TelegramAgent, WebhookAgent
+from absulli.web.rss import (
+    RSS_DELIVERY_AGENT,
+    RSS_EVENT_TYPES,
+    RSS_FEED_ENABLED_SETTING,
+    rss_setting_enabled,
+)
 
 log = logging.getLogger(__name__)
 
@@ -388,6 +394,10 @@ def agent_library_enabled(agent_id: str, event_type: str, library_id: str = "") 
 
 
 def event_enabled(event_type: str) -> bool:
+    if event_type in RSS_EVENT_TYPES and rss_setting_enabled(
+        setup_state.get_setup_setting(RSS_FEED_ENABLED_SETTING, "false")
+    ):
+        return True
     setting_name = NOTIFICATION_EVENT_SETTINGS.get(event_type)
     if not setting_name:
         return True
@@ -491,13 +501,35 @@ class NotificationManager:
             if agent_event_enabled(agent_id, event_type)
             and agent_library_enabled(agent_id, event_type, library_id)
         ]
-        if not agents:
+        rss_enabled = event_type in RSS_EVENT_TYPES and rss_setting_enabled(
+            setup_state.get_setup_setting(RSS_FEED_ENABLED_SETTING, "false")
+        )
+        if not agents and not rss_enabled:
             return
 
-        event = NotificationEvent(event_type=event_type, title=title, body=body)
+        event = NotificationEvent(
+            event_type=event_type,
+            title=title,
+            body=body,
+            library_id=str(library_id or ""),
+            context_json=(
+                json.dumps(context or {}, ensure_ascii=False, default=str)
+                if rss_enabled
+                else ""
+            ),
+        )
         db.add(event)
         db.commit()
-        delivered = False
+        delivered = rss_enabled
+        if rss_enabled:
+            db.add(
+                NotificationDelivery(
+                    event_id=event.id,
+                    agent=RSS_DELIVERY_AGENT,
+                    delivered=True,
+                    error="",
+                )
+            )
         base_extra = {"event_type": event_type, **(context or {})}
         public_url = self.settings.effective_setting("public_url").rstrip("/")
         abs_url = self.settings.effective_abs_url.rstrip("/")

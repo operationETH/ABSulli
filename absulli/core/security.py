@@ -19,6 +19,7 @@ from absulli.database.session import SessionLocal
 
 
 PUBLIC_PATH_PREFIXES = (
+    "/feeds/",
     "/static/",
     "/notification-covers/",
 )

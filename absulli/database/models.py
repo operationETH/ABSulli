@@ -152,6 +152,8 @@ class NotificationEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(512), default="")
     body: Mapped[str] = mapped_column(Text, default="")
+    library_id: Mapped[str] = mapped_column(String(128), default="")
+    context_json: Mapped[str] = mapped_column(Text, default="")
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

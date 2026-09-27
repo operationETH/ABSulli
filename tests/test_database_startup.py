@@ -45,4 +45,36 @@ print(json.dumps({"before": before, "after": after, "revision": revision}))
     assert payload["before"] == []
     assert "settings" in payload["after"]
     assert "alembic_version" in payload["after"]
-    assert payload["revision"] == "0005_add_library_archive_state"
+    assert payload["revision"] == "0006_add_rss_feed_metadata"
+
+
+def test_models_match_migrated_database_schema(tmp_path):
+    env = os.environ.copy()
+    env["ABSULLI_DATA_DIR"] = str(tmp_path)
+    env["ABSULLI_SECRET_KEY"] = "test-secret-key-that-is-long-enough-32"
+    env.pop("ABSULLI_CORS_ALLOWED_ORIGINS", None)
+
+    code = """
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+
+from absulli.database.models import Base
+from absulli.database.session import engine, init_db
+
+init_db()
+
+with engine.connect() as connection:
+    context = MigrationContext.configure(connection, opts={"compare_type": True})
+    differences = compare_metadata(context, Base.metadata)
+
+assert differences == [], f"model and migrations disagree: {differences}"
+"""
+
+    subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
