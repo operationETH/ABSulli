@@ -47,7 +47,7 @@ class MediaItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     abs_item_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    library_id: Mapped[str] = mapped_column(String(128), default="")
+    library_id: Mapped[str] = mapped_column(String(128), default="", index=True)
     library_name: Mapped[str] = mapped_column(String(255), default="")
     media_type: Mapped[str] = mapped_column(String(64), default="unknown")
     title: Mapped[str] = mapped_column(String(512), index=True)
@@ -152,7 +152,7 @@ class NotificationEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(512), default="")
     body: Mapped[str] = mapped_column(Text, default="")
-    library_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    library_id: Mapped[str] = mapped_column(String(128), default="")
     context_json: Mapped[str] = mapped_column(Text, default="")
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
