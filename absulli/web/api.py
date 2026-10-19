@@ -9,7 +9,7 @@ from absulli.database.models import AbsUser, ActivitySession, Library, Listening
 from absulli.database.session import get_db
 from absulli.core.setup_state import get_setup_setting, is_setup_complete
 from absulli.core.time import utcnow, utcnow_iso, unix_seconds
-from absulli.core.security import rotate_session_version, verify_metrics_access
+from absulli.core.security import rotate_session_version, validate_csrf_token, verify_metrics_access
 from absulli.web.queries import active_sessions_query, enrich_active_rows
 from absulli.web.api_models import (
     ActivityRow,
@@ -148,10 +148,15 @@ def _libraries_payload(db: Session) -> list[dict]:
 
 
 def _revoke_sessions(request: Request) -> dict:
-    if getattr(request.state, "absulli_auth_method", "") != "api_token":
+    if getattr(request.state, "absulli_auth_method", "") != "session":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="API token required to revoke browser sessions",
+            detail="Browser session required to revoke sessions",
+        )
+    if not validate_csrf_token(request, request.headers.get("X-CSRF-Token")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Valid CSRF token required",
         )
     rotate_session_version()
     return {"status": "ok", "revoked_sessions": True}

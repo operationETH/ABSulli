@@ -102,6 +102,16 @@ When these are set, the setup wizard shows them as read-only and uses them autom
 
 ---
 
+## API access
+
+When authentication is enabled, the ABSulli API token allows read-only GET requests to `/api/v1/status`, `/api/v1/activity`, `/api/v1/history`, `/api/v1/users`, and `/api/v1/libraries`. Deprecated `/api/` aliases remain available for those five resources. Use `X-API-Key`, `X-Absulli-Api-Token`, or `Authorization: Bearer` to provide the token.
+
+The integration token cannot open the admin web UI, run jobs, change settings, or revoke browser sessions. Revoking browser sessions through `/api/v1/auth/revoke-sessions` requires an authenticated browser session and a valid `X-CSRF-Token` header matching the CSRF cookie. Keep authentication enabled when exposing ABSulli through a reverse proxy.
+
+With proxy trust enabled, login rate limiting uses the rightmost valid `X-Forwarded-For` address. Configure the proxy to append its observed client address and block direct access to the backend. If the proxy does not append a trustworthy address, disable proxy trust until it is configured correctly.
+
+---
+
 ## Prometheus metrics
 
 ABSulli exposes Prometheus metrics at `/metrics`. This can be scraped by Prometheus for Grafana dashboards or external monitoring.

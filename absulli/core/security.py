@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 from datetime import timedelta
 from urllib.parse import quote
@@ -16,6 +17,20 @@ from absulli.core.setup_state import get_setup_setting, is_setup_complete
 from absulli.core.time import utcnow
 from absulli.database.models import LoginAttempt, LoginLog, Setting
 from absulli.database.session import SessionLocal
+
+
+API_TOKEN_READ_PATHS = frozenset({
+    "/api/v1/status",
+    "/api/v1/activity",
+    "/api/v1/history",
+    "/api/v1/users",
+    "/api/v1/libraries",
+    "/api/status",
+    "/api/activity",
+    "/api/history",
+    "/api/users",
+    "/api/libraries",
+})
 
 
 PUBLIC_PATH_PREFIXES = (
@@ -192,7 +207,7 @@ class SecurityHeadersMiddleware:
         if path == "/metrics" and settings.effective_metrics_token:
             return None
 
-        if _valid_api_token(request):
+        if request.method == "GET" and path in API_TOKEN_READ_PATHS and _valid_api_token(request):
             request.state.absulli_authenticated = True
             request.state.absulli_auth_method = "api_token"
             return None
@@ -498,9 +513,12 @@ def _b64decode(value: str) -> bytes:
 def client_key(request: Request) -> str:
     settings = get_settings()
     if settings.effective_trust_proxy:
-        forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+        forwarded = request.headers.get("X-Forwarded-For", "").rsplit(",", 1)[-1].strip()
         if forwarded:
-            return forwarded
+            try:
+                return str(ipaddress.ip_address(forwarded))
+            except ValueError:
+                pass
     return request.client.host if request.client else "unknown"
 
 

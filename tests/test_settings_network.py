@@ -205,7 +205,7 @@ def test_client_key_uses_saved_trust_proxy_setting(monkeypatch):
         headers = {"X-Forwarded-For": "203.0.113.10, 10.0.0.1"}
         client = type("Client", (), {"host": "127.0.0.1"})()
 
-    assert client_key(Request()) == "203.0.113.10"
+    assert client_key(Request()) == "10.0.0.1"
 
 
 def test_network_settings_save_persists_cors_origins_and_hsts_toggle(monkeypatch):

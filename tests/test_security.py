@@ -201,7 +201,7 @@ def test_client_key_ignores_x_forwarded_for_until_trust_proxy_enabled(monkeypatc
     monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
     get_settings.cache_clear()
     trusted = client.get("/client-key", headers={"X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
-    assert trusted.json()["client_key"] == "203.0.113.9"
+    assert trusted.json()["client_key"] == "10.0.0.1"
 
     get_settings.cache_clear()
 
@@ -441,43 +441,70 @@ def test_session_cookie_requires_current_token_version(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_revoke_sessions_endpoint_requires_api_token(monkeypatch):
+def test_api_token_cannot_access_admin_or_mutating_endpoints(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_API_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_API_KEY", "api-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr(security, "setup_required", lambda: False)
+
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.get("/settings")
+    def settings():
+        return {"secret": "private"}
+
+    @app.get("/api/v1/status")
+    def status_route():
+        return {"status": "ok"}
+
+    @app.post("/api/v1/status")
+    def status_write():
+        return {"modified": True}
+
+    @app.get("/api/v1/jobs")
+    def jobs():
+        return {"jobs": []}
+
+    client = TestClient(app)
+    for header in ({"X-API-Key": "api-token"}, {"Authorization": "Bearer api-token"}, {"X-Absulli-Api-Token": "api-token"}):
+        assert client.get("/api/v1/status", headers=header).status_code == 200
+        assert client.get("/settings", headers=header, follow_redirects=False).status_code == 303
+        assert client.get("/api/v1/jobs", headers=header).status_code == 401
+        assert client.post("/api/v1/status", headers=header).status_code == 401
+        assert client.post("/api/v1/auth/revoke-sessions", headers=header).status_code == 401
+    get_settings.cache_clear()
+
+
+def test_revoke_sessions_requires_browser_session_and_csrf(monkeypatch):
     monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
     monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
-    monkeypatch.setenv("ABSULLI_AUTH_PASSWORD", "test123")
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
     monkeypatch.setenv("ABSULLI_API_ENABLED", "true")
     monkeypatch.setenv("ABSULLI_API_KEY", "api-token")
     get_settings.cache_clear()
+    monkeypatch.setattr(security, "setup_required", lambda: False)
 
     import absulli.web.api as api
 
     called = {"rotated": False}
-
-    def fake_rotate_session_version():
-        called["rotated"] = True
-        return "new-version"
-
-    monkeypatch.setattr(api, "rotate_session_version", fake_rotate_session_version)
+    monkeypatch.setattr(api, "rotate_session_version", lambda: called.update(rotated=True))
+    monkeypatch.setattr(api, "validate_csrf_token", lambda request, token: token == "valid")
+    monkeypatch.setattr(security, "read_session_cookie", lambda request: "admin" if request.cookies.get("absulli_session") == "session" else "")
 
     app = FastAPI()
     app.add_middleware(SecurityHeadersMiddleware)
     app.include_router(api_router)
-
     client = TestClient(app)
-
-    no_token = client.post("/api/v1/auth/revoke-sessions")
-    assert no_token.status_code == 401
+    assert client.post("/api/v1/auth/revoke-sessions", headers={"X-API-Key": "api-token"}).status_code == 401
+    client.cookies.set("absulli_session", "session")
+    assert client.post("/api/v1/auth/revoke-sessions").status_code == 403
     assert not called["rotated"]
-
-    response = client.post(
-        "/api/v1/auth/revoke-sessions",
-        headers={"X-API-Key": "api-token"},
-    )
+    response = client.post("/api/v1/auth/revoke-sessions", headers={"X-CSRF-Token": "valid"})
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "revoked_sessions": True}
     assert called["rotated"]
-
     get_settings.cache_clear()
 
 
@@ -533,8 +560,8 @@ def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatc
     monkeypatch.setenv("ABSULLI_AUTH_LOGIN_LOCKOUT_SECONDS", "900")
     get_settings.cache_clear()
 
-    forwarded_ip = "198.51.100.44"
-    other_forwarded_ip = "198.51.100.45"
+    forwarded_ip = "10.0.0.10"
+    other_forwarded_ip = "10.0.0.11"
     with SessionLocal() as db:
         db.query(LoginAttempt).filter(LoginAttempt.client_key.in_([forwarded_ip, other_forwarded_ip])).delete(
             synchronize_session=False
@@ -552,7 +579,7 @@ def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatc
     for _ in range(2):
         response = client.post(
             "/login",
-            headers={"X-Forwarded-For": f"{forwarded_ip}, 10.0.0.10"},
+            headers={"X-Forwarded-For": f"198.51.100.44, {forwarded_ip}"},
             data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
             follow_redirects=False,
         )
@@ -560,15 +587,23 @@ def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatc
 
     limited = client.post(
         "/login",
-        headers={"X-Forwarded-For": f"{forwarded_ip}, 10.0.0.10"},
+        headers={"X-Forwarded-For": f"198.51.100.44, {forwarded_ip}"},
         data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
         follow_redirects=False,
     )
     assert limited.status_code == 429
 
+    spoofed_leftmost = client.post(
+        "/login",
+        headers={"X-Forwarded-For": f"203.0.113.99, {forwarded_ip}"},
+        data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
+        follow_redirects=False,
+    )
+    assert spoofed_leftmost.status_code == 429
+
     other_ip = client.post(
         "/login",
-        headers={"X-Forwarded-For": f"{other_forwarded_ip}, 10.0.0.10"},
+        headers={"X-Forwarded-For": f"198.51.100.45, {other_forwarded_ip}"},
         data={"username": "admin", "password": "wrong", "next": "/", "csrf_token": "ok"},
         follow_redirects=False,
     )
