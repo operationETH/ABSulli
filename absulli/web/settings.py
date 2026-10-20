@@ -334,6 +334,13 @@ NETWORK_FIELD_CONFIGS = [
         "default": False,
     },
     {
+        "name": "trusted_proxy_ips",
+        "label": "Trusted Proxy IP Addresses",
+        "description": "Comma-separated proxy IP addresses or narrow CIDR ranges. Use the exact Traefik address, not the full Docker subnet.",
+        "type": "text",
+        "placeholder": "172.18.0.5/32",
+    },
+    {
         "name": "cookie_secure",
         "label": "HTTPS Secure Cookies",
         "description": "Mark browser cookies as HTTPS-only when ABSulli is served through TLS.",
@@ -898,6 +905,13 @@ def network_values_from_form(settings, form) -> dict[str, str]:
         submitted = clean_agent_value(str(form.get(field_name) or ""))
         values[field_name] = submitted
 
+    from absulli.core.config import parse_trusted_proxy_ips
+
+    trusted_ips = values.get("trusted_proxy_ips", "")
+    networks = parse_trusted_proxy_ips(trusted_ips)
+    values["trusted_proxy_ips"] = ", ".join(str(network) for network in networks)
+    if values.get("trust_proxy") == "true" and not networks:
+        raise ValueError("Add a trusted proxy IP address before enabling proxy trust")
     if values.get("metrics_token") == "change_me":
         raise ValueError("Metrics token cannot be change_me")
     if "cors_allowed_origins" in values:

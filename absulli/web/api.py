@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, Summary, generate_latest
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -9,13 +9,12 @@ from absulli.database.models import AbsUser, ActivitySession, Library, Listening
 from absulli.database.session import get_db
 from absulli.core.setup_state import get_setup_setting, is_setup_complete
 from absulli.core.time import utcnow, utcnow_iso, unix_seconds
-from absulli.core.security import rotate_session_version, validate_csrf_token, verify_metrics_access
+from absulli.core.security import verify_metrics_access
 from absulli.web.queries import active_sessions_query, enrich_active_rows
 from absulli.web.api_models import (
     ActivityRow,
     HistoryRow,
     LibraryRow,
-    RevokeResponse,
     StatusResponse,
     UserRow,
 )
@@ -147,21 +146,6 @@ def _libraries_payload(db: Session) -> list[dict]:
     ]
 
 
-def _revoke_sessions(request: Request) -> dict:
-    if getattr(request.state, "absulli_auth_method", "") != "session":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Browser session required to revoke sessions",
-        )
-    if not validate_csrf_token(request, request.headers.get("X-CSRF-Token")):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Valid CSRF token required",
-        )
-    rotate_session_version()
-    return {"status": "ok", "revoked_sessions": True}
-
-
 @v1_router.get("/status", response_model=StatusResponse)
 def v1_status(db: Session = Depends(get_db)):
     return _status_payload(db)
@@ -185,11 +169,6 @@ def v1_users(db: Session = Depends(get_db)):
 @v1_router.get("/libraries", response_model=list[LibraryRow])
 def v1_libraries(db: Session = Depends(get_db)):
     return _libraries_payload(db)
-
-
-@v1_router.post("/auth/revoke-sessions", response_model=RevokeResponse)
-def v1_revoke_sessions(request: Request):
-    return _revoke_sessions(request)
 
 
 @legacy_router.get("/status", response_model=StatusResponse)
@@ -220,12 +199,6 @@ def legacy_users(request: Request, response: Response, db: Session = Depends(get
 def legacy_libraries(request: Request, response: Response, db: Session = Depends(get_db)):
     _mark_deprecated(response, request, "/api/v1/libraries")
     return _libraries_payload(db)
-
-
-@legacy_router.post("/auth/revoke-sessions", response_model=RevokeResponse)
-def legacy_revoke_sessions(request: Request, response: Response):
-    _mark_deprecated(response, request, "/api/v1/auth/revoke-sessions")
-    return _revoke_sessions(request)
 
 
 @metrics_router.get("/metrics")

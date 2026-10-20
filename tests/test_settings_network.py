@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
 
 import absulli.core.setup_state as setup_state
 import absulli.web.routes as web_routes
@@ -13,6 +14,7 @@ def make_client(monkeypatch, store=None):
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
     for key in [
         "ABSULLI_TRUST_PROXY",
+        "ABSULLI_TRUSTED_PROXY_IPS",
         "ABSULLI_PUBLIC_URL",
         "ABSULLI_COOKIE_SECURE",
         "ABSULLI_METRICS_TOKEN",
@@ -68,6 +70,7 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert "ABSulli Public URL" in response.text
     assert "Base URL used for notification cover art" in response.text
     assert "Trust Reverse Proxy Headers" in response.text
+    assert "Trusted Proxy IP Addresses" in response.text
     assert "Use X-Forwarded-For" in response.text
     assert 'name="trust_proxy" checked' in response.text
     assert "HTTPS Secure Cookies" in response.text
@@ -95,6 +98,7 @@ def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_t
             "csrf_token": "valid-token",
             "public_url": " https://absulli.example.com/ ",
             "trust_proxy": "on",
+            "trusted_proxy_ips": "127.0.0.1/32",
             "cookie_secure": "on",
             "metrics_token": "",
         },
@@ -105,6 +109,7 @@ def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_t
     assert response.headers["location"] == "/settings?tab=network&saved=network"
     assert store["public_url"] == "https://absulli.example.com"
     assert store["trust_proxy"] == "true"
+    assert store["trusted_proxy_ips"] == "127.0.0.1/32"
     assert store["cookie_secure"] == "true"
     assert store["metrics_token"] == ""
     assert store["security_hsts_enabled"] == "false"
@@ -169,6 +174,7 @@ def test_network_settings_env_values_win_over_saved_settings(monkeypatch):
         data={
             "csrf_token": "valid-token",
             "trust_proxy": "on",
+            "trusted_proxy_ips": "127.0.0.1/32",
             "cookie_secure": "on",
             "metrics_token": "new-token",
         },
@@ -200,9 +206,11 @@ def test_effective_network_settings_read_saved_values(monkeypatch):
 
 def test_client_key_uses_saved_trust_proxy_setting(monkeypatch):
     make_client(monkeypatch, {"trust_proxy": "true"})
+    monkeypatch.setenv("ABSULLI_TRUSTED_PROXY_IPS", "127.0.0.1/32")
+    get_settings.cache_clear()
 
     class Request:
-        headers = {"X-Forwarded-For": "203.0.113.10, 10.0.0.1"}
+        headers = Headers({"X-Forwarded-For": "203.0.113.10, 10.0.0.1"})
         client = type("Client", (), {"host": "127.0.0.1"})()
 
     assert client_key(Request()) == "10.0.0.1"
@@ -324,3 +332,74 @@ def test_network_settings_regenerates_metrics_token(monkeypatch):
     assert store["metrics_token"]
     assert store["metrics_token"] != "change_me"
 
+
+
+def test_network_rejects_missing_trusted_proxy_address(monkeypatch):
+    client, store = make_client(monkeypatch)
+    response = client.post(
+        "/settings/network",
+        data={"csrf_token": "ok", "trust_proxy": "on"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+    assert store == {}
+
+
+def test_network_rejects_invalid_trusted_proxy_address(monkeypatch):
+    client, store = make_client(monkeypatch)
+    response = client.post(
+        "/settings/network",
+        data={"csrf_token": "ok", "trust_proxy": "on", "trusted_proxy_ips": "172.18.0.0/166"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "Invalid%20trusted%20proxy" in response.headers["location"]
+    assert store == {}
+
+
+def test_saved_trusted_proxy_addresses_apply_to_client_key(monkeypatch):
+    make_client(monkeypatch, {"trust_proxy": "true", "trusted_proxy_ips": "127.0.0.1/32"})
+
+    class Request:
+        headers = Headers({"X-Forwarded-For": "203.0.113.10, 10.0.0.1"})
+        client = type("Client", (), {"host": "127.0.0.1"})()
+
+    assert client_key(Request()) == "10.0.0.1"
+
+
+def test_invalid_environment_trusted_proxy_fails_closed_with_warning(monkeypatch, caplog):
+    make_client(monkeypatch, {"trust_proxy": "true"})
+    monkeypatch.setenv("ABSULLI_TRUSTED_PROXY_IPS", "172.18.0.0/166")
+    get_settings.cache_clear()
+
+    class Request:
+        headers = Headers({"X-Forwarded-For": "6.6.6.6"})
+        client = type("Client", (), {"host": "127.0.0.1"})()
+
+    with caplog.at_level("WARNING"):
+        assert client_key(Request()) == "127.0.0.1"
+    assert "172.18.0.0/166" in caplog.text
+
+
+def test_network_warns_when_saved_proxy_trust_has_no_trusted_addresses(monkeypatch):
+    client, _store = make_client(monkeypatch, {"trust_proxy": "true"})
+    response = client.get("/settings?tab=network")
+    assert response.status_code == 200
+    assert "Proxy trust is enabled but no valid trusted proxy IP addresses" in response.text
+
+
+def test_network_warns_when_environment_proxy_trust_has_no_trusted_addresses(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
+    get_settings.cache_clear()
+    response = client.get("/settings?tab=network")
+    assert response.status_code == 200
+    assert "Proxy trust is enabled but no valid trusted proxy IP addresses" in response.text
+
+
+def test_network_does_not_warn_when_trusted_proxy_is_configured(monkeypatch):
+    client, _store = make_client(monkeypatch, {"trust_proxy": "true", "trusted_proxy_ips": "127.0.0.1/32"})
+    response = client.get("/settings?tab=network")
+    assert response.status_code == 200
+    assert "Proxy trust is enabled but no valid trusted proxy IP addresses" not in response.text

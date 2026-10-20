@@ -512,14 +512,24 @@ def _b64decode(value: str) -> bytes:
 
 def client_key(request: Request) -> str:
     settings = get_settings()
-    if settings.effective_trust_proxy:
-        forwarded = request.headers.get("X-Forwarded-For", "").rsplit(",", 1)[-1].strip()
-        if forwarded:
-            try:
-                return str(ipaddress.ip_address(forwarded))
-            except ValueError:
-                pass
-    return request.client.host if request.client else "unknown"
+    peer = request.client.host if request.client else "unknown"
+    if not settings.effective_trust_proxy:
+        return peer
+    try:
+        peer_ip = ipaddress.ip_address(peer)
+        trusted_networks = settings.trusted_proxy_networks
+    except ValueError:
+        return peer
+    if not any(peer_ip in network for network in trusted_networks):
+        return peer
+    forwarded_values = request.headers.getlist("x-forwarded-for")
+    if forwarded_values:
+        forwarded = ",".join(forwarded_values).rsplit(",", 1)[-1].strip()
+        try:
+            return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+    return peer
 
 
 def record_login_event(

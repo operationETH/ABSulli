@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 
 from absulli.core.config import get_settings
+from absulli.main import app as real_app
 from absulli.core.security import (
     DEFAULT_PBKDF2_ITERATIONS,
     SecurityHeadersMiddleware,
@@ -194,11 +195,12 @@ def test_client_key_ignores_x_forwarded_for_until_trust_proxy_enabled(monkeypatc
 
     monkeypatch.setenv("ABSULLI_TRUST_PROXY", "false")
     get_settings.cache_clear()
-    client = TestClient(app)
+    client = TestClient(app, client=("10.2.0.3", 50000))
     untrusted = client.get("/client-key", headers={"X-Forwarded-For": "203.0.113.9"})
     assert untrusted.json()["client_key"] != "203.0.113.9"
 
     monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
+    monkeypatch.setenv("ABSULLI_TRUSTED_PROXY_IPS", "10.2.0.3/32")
     get_settings.cache_clear()
     trusted = client.get("/client-key", headers={"X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
     assert trusted.json()["client_key"] == "10.0.0.1"
@@ -477,37 +479,6 @@ def test_api_token_cannot_access_admin_or_mutating_endpoints(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_revoke_sessions_requires_browser_session_and_csrf(monkeypatch):
-    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
-    monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
-    monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
-    monkeypatch.setenv("ABSULLI_API_ENABLED", "true")
-    monkeypatch.setenv("ABSULLI_API_KEY", "api-token")
-    get_settings.cache_clear()
-    monkeypatch.setattr(security, "setup_required", lambda: False)
-
-    import absulli.web.api as api
-
-    called = {"rotated": False}
-    monkeypatch.setattr(api, "rotate_session_version", lambda: called.update(rotated=True))
-    monkeypatch.setattr(api, "validate_csrf_token", lambda request, token: token == "valid")
-    monkeypatch.setattr(security, "read_session_cookie", lambda request: "admin" if request.cookies.get("absulli_session") == "session" else "")
-
-    app = FastAPI()
-    app.add_middleware(SecurityHeadersMiddleware)
-    app.include_router(api_router)
-    client = TestClient(app)
-    assert client.post("/api/v1/auth/revoke-sessions", headers={"X-API-Key": "api-token"}).status_code == 401
-    client.cookies.set("absulli_session", "session")
-    assert client.post("/api/v1/auth/revoke-sessions").status_code == 403
-    assert not called["rotated"]
-    response = client.post("/api/v1/auth/revoke-sessions", headers={"X-CSRF-Token": "valid"})
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok", "revoked_sessions": True}
-    assert called["rotated"]
-    get_settings.cache_clear()
-
-
 def test_setup_mode_allows_favicon_and_healthz_without_redirect_or_csrf_rotation(monkeypatch):
     monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
@@ -555,6 +526,7 @@ def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatc
     monkeypatch.setenv("ABSULLI_AUTH_PASSWORD", "test123")
     monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
     monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
+    monkeypatch.setenv("ABSULLI_TRUSTED_PROXY_IPS", "10.2.0.3/32")
     monkeypatch.setenv("ABSULLI_AUTH_LOGIN_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("ABSULLI_AUTH_LOGIN_WINDOW_SECONDS", "900")
     monkeypatch.setenv("ABSULLI_AUTH_LOGIN_LOCKOUT_SECONDS", "900")
@@ -574,7 +546,7 @@ def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatc
     app = FastAPI()
     app.add_middleware(SecurityHeadersMiddleware)
     app.include_router(web_router)
-    client = TestClient(app)
+    client = TestClient(app, client=("10.2.0.3", 50000))
 
     for _ in range(2):
         response = client.post(
@@ -619,4 +591,86 @@ def test_login_rate_limit_uses_forwarded_for_when_trust_proxy_enabled(monkeypatc
         )
         db.commit()
 
+    get_settings.cache_clear()
+
+
+def test_real_app_rejects_admin_api_token(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_API_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_API_KEY", "integration-token")
+    monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
+    get_settings.cache_clear()
+    monkeypatch.setattr(security, "setup_required", lambda: False)
+    client = TestClient(real_app)
+    token = {"X-API-Key": "integration-token"}
+    response = client.get("/settings", headers=token, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")
+    response = client.post("/settings/general", headers=token, data={"abs_url": "http://attacker.example"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")
+    response = client.post("/settings/api/regenerate", headers=token, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")
+    assert client.post("/api/v1/auth/revoke-sessions", headers=token).status_code == 401
+    get_settings.cache_clear()
+
+
+def test_multiple_forwarding_headers_and_direct_access(monkeypatch):
+    monkeypatch.setenv("ABSULLI_TRUST_PROXY", "true")
+    monkeypatch.setenv("ABSULLI_TRUSTED_PROXY_IPS", "10.2.0.3/32")
+    get_settings.cache_clear()
+    app = FastAPI()
+
+    @app.get("/client-key")
+    def client_key_route(request: Request):
+        return {"ip": security.client_key(request)}
+
+    client = TestClient(app, client=("10.2.0.3", 50000))
+    response = client.get("/client-key", headers=[("X-Forwarded-For", "6.6.6.6"), ("X-Forwarded-For", "192.0.2.42")])
+    assert response.json()["ip"] == "192.0.2.42"
+    direct = TestClient(app, client=("192.0.2.100", 50000))
+    response = direct.get("/client-key", headers={"X-Forwarded-For": "6.6.6.6"})
+    assert response.json()["ip"] == "192.0.2.100"
+    get_settings.cache_clear()
+
+
+def test_sign_out_everywhere_revokes_two_browser_sessions(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "true")
+    monkeypatch.setenv("ABSULLI_AUTH_USERNAME", "admin")
+    monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
+    get_settings.cache_clear()
+    monkeypatch.setattr(security, "setup_required", lambda: False)
+    monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: token == "valid")
+    first = TestClient(real_app)
+    second = TestClient(real_app)
+    first.cookies.set("absulli_session", security.create_session_token("admin"))
+    second.cookies.set("absulli_session", security.create_session_token("admin"))
+    for client in (first, second):
+        assert client.get("/settings", follow_redirects=False).status_code == 200
+    assert first.post(
+        "/settings/users/revoke-sessions", data={"csrf_token": "invalid"}, follow_redirects=False
+    ).status_code == 403
+    assert second.get("/settings", follow_redirects=False).status_code == 200
+    response = first.post(
+        "/settings/users/revoke-sessions", data={"csrf_token": "valid"}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+    for client in (first, second):
+        response = client.get("/settings", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/login")
+    get_settings.cache_clear()
+
+
+def test_removed_api_session_revoke_routes_are_unregistered(monkeypatch):
+    monkeypatch.setenv("ABSULLI_SECRET_KEY", "test-secret-key-that-is-long-enough-32")
+    get_settings.cache_clear()
+    monkeypatch.setattr(security, "setup_required", lambda: False)
+    client = TestClient(real_app)
+    client.cookies.set("absulli_session", security.create_session_token("admin"))
+    for path in ("/api/v1/auth/revoke-sessions", "/api/auth/revoke-sessions"):
+        assert client.post(path, follow_redirects=False).status_code in (404, 405)
+    assert client.post("/settings/users/revoke-sessions", data={"csrf_token": "invalid"}, follow_redirects=False).status_code == 403
     get_settings.cache_clear()

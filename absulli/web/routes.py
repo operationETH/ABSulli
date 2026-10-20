@@ -1470,6 +1470,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "about_data": about_data_context(db),
             "general_fields": general_settings_context(settings),
             "network_fields": network_settings_context(settings),
+            "trusted_proxy_warning": settings.effective_trust_proxy and not settings.trusted_proxy_networks,
             "api_settings": api_settings_context(settings),
             "rss_feed": rss_feed_context(settings, str(request.base_url)),
             "gotify": gotify_settings_context(settings),
@@ -1539,6 +1540,20 @@ async def jobs_schedule(request: Request, job_id: str):
     return {"updated": True, "job": job}
 
 
+@router.post("/settings/users/revoke-sessions", response_class=HTMLResponse)
+async def settings_users_revoke_sessions(request: Request):
+    form = await request.form()
+    if not validate_csrf_token(request, str(form.get("csrf_token") or "")):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+    if getattr(request.state, "absulli_auth_method", "") != "session":
+        raise HTTPException(status_code=403, detail="Browser session required.")
+    rotate_session_version()
+    response = RedirectResponse("/login", status_code=303)
+    clear_session_cookie(response)
+    clear_csrf_cookie(response)
+    return response
+
+
 @router.post("/settings/users", response_class=HTMLResponse)
 async def settings_users_save(request: Request):
     form = await request.form()
@@ -1555,7 +1570,7 @@ async def settings_users_save(request: Request):
     previous_username = auth_username()
     set_setup_settings(values)
     username_changed = values.get("auth_username", previous_username) != previous_username
-    revoke_sessions = bool(password_changed or username_changed or form.get("revoke_sessions") == "on")
+    revoke_sessions = bool(password_changed or username_changed)
 
     response = RedirectResponse("/settings?tab=users&saved=users", status_code=303)
     if revoke_sessions:

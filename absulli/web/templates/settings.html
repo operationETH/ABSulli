@@ -86,6 +86,9 @@
       <p>Configure the common reverse proxy and metrics options for your ABSulli instance.</p>
     </div>
   </div>
+  {% if trusted_proxy_warning %}
+  <p role="alert">Proxy trust is enabled but no valid trusted proxy IP addresses are configured. Login rate limits will use the connecting proxy IP until this is corrected.</p>
+  {% endif %}
   <form class="settings-form compact-settings-form" method="post" action="/settings/network">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="settings-list">
@@ -187,15 +190,15 @@
         <h3>Sessions</h3>
         <p>Changing the username or password revokes sessions automatically.</p>
       </div>
-      <label class="settings-check field-check">
-        <input type="checkbox" name="revoke_sessions">
-        <span>Revoke existing browser sessions after saving</span>
-      </label>
     </div>
 
     <div class="form-actions">
+      <button type="submit" class="secondary" form="revoke-all-sessions-form">Sign out everywhere</button>
       <button type="submit">Save Changes</button>
     </div>
+  </form>
+  <form id="revoke-all-sessions-form" method="post" action="/settings/users/revoke-sessions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>
 </section>
 
