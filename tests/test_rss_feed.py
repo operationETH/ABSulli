@@ -244,7 +244,14 @@ def test_rss_settings_generate_and_regenerate_global_url(monkeypatch):
     assert page.status_code == 200
     assert "<h2>RSS Feed</h2>" in page.text
     assert page.text.index("Message Templates") < page.text.index("<h2>RSS Feed</h2>")
-    assert f"/feeds/new-media/{original_token}.xml" in page.text
+    assert f"/feeds/new-media/{original_token}.xml" not in page.text
+    revealed = client.post(
+        "/settings/secret",
+        data={"csrf_token": "valid-token", "kind": "rss"},
+    )
+    assert revealed.status_code == 200
+    assert revealed.headers["cache-control"] == "no-store"
+    assert f"/feeds/new-media/{original_token}.xml" in revealed.json()["value"]
 
     general_page = client.get("/settings?tab=general")
     assert "rss-feed-settings-panel" not in general_page.text

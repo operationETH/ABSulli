@@ -1104,6 +1104,21 @@ document.addEventListener('focusin', (event) => {
   }
 });
 
+async function loadSettingsSecret(kind) {
+  const csrf = document.querySelector('input[name="csrf_token"]')?.value;
+  if (!csrf) throw new Error('Missing CSRF token');
+  const response = await fetch('/settings/secret', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ csrf_token: csrf, kind }),
+    cache: 'no-store'
+  });
+  if (!response.ok) throw new Error('Unable to retrieve saved value');
+  const result = await response.json();
+  return result.value || '';
+}
+
 document.addEventListener('click', async (event) => {
   const jobEdit = event.target.closest('[data-job-edit]');
   if (jobEdit) {
@@ -1150,7 +1165,7 @@ document.addEventListener('click', async (event) => {
     if (!list) return;
     const row = document.createElement('div');
     row.className = 'webhook-custom-header-row';
-    row.innerHTML = '<input name="webhook_custom_header_name" type="text" placeholder="Header Name" autocomplete="off"><input name="webhook_custom_header_value" type="text" placeholder="Header Value" autocomplete="off"><button type="button" class="secondary" data-webhook-remove-header>Remove</button>';
+    row.innerHTML = '<input name="webhook_custom_header_name" type="text" placeholder="Header Name" autocomplete="off"><input name="webhook_custom_header_value" type="password" placeholder="Header Value" autocomplete="off"><button type="button" class="secondary" data-webhook-remove-header>Remove</button>';
     list.appendChild(row);
     row.querySelector('input')?.focus();
     return;
@@ -1177,57 +1192,21 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  const absToggle = event.target.closest('[data-abs-api-key-toggle]');
-  if (absToggle) {
-    const input = document.getElementById('abs-api-key');
-    if (!input) return;
-    const fromEnv = input.dataset.absApiKeyFromEnv === 'true';
-    if (fromEnv) {
-      const masked = input.dataset.absApiKeyMasked !== 'false';
-      const nextMasked = !masked;
-      input.value = nextMasked ? 'Configured via .env read only' : (input.dataset.absApiKeyValue || '');
-      input.dataset.absApiKeyMasked = nextMasked ? 'true' : 'false';
-    } else {
-      const showing = input.type === 'text';
-      input.type = showing ? 'password' : 'text';
-    }
-    const masked = fromEnv ? input.dataset.absApiKeyMasked !== 'false' : input.type === 'password';
-    const showIcon = absToggle.querySelector('.abs-api-key-icon-show');
-    const hideIcon = absToggle.querySelector('.abs-api-key-icon-hide');
-    if (showIcon) showIcon.hidden = !masked;
-    if (hideIcon) hideIcon.hidden = masked;
-    const label = masked ? 'Show Audiobookshelf API key' : 'Hide Audiobookshelf API key';
-    absToggle.setAttribute('aria-label', label);
-    absToggle.setAttribute('title', label);
-    return;
-  }
-
-  const absCopy = event.target.closest('[data-abs-api-key-copy]');
-  if (absCopy) {
-    const input = document.getElementById('abs-api-key');
-    const status = document.getElementById('abs-api-key-copy-status');
-    if (!input) return;
-    const value = input.dataset.absApiKeyFromEnv === 'true' ? (input.dataset.absApiKeyValue || '') : input.value;
-    try {
-      await copyTextToClipboard(value);
-      if (status) status.textContent = 'Copied.';
-    } catch {
-      if (status) status.textContent = 'Copy failed.';
-    }
-    if (status) {
-      status.hidden = false;
-      window.setTimeout(() => { status.hidden = true; }, 2000);
-    }
-    return;
-  }
-
   const toggle = event.target.closest('[data-api-key-toggle]');
   if (toggle) {
     const input = document.getElementById('absulli-api-key');
     if (!input) return;
     const masked = input.dataset.apiKeyMasked !== 'false';
     const nextMasked = !masked;
-    input.value = nextMasked ? '•'.repeat(48) : (input.dataset.apiKeyValue || '');
+    if (nextMasked) {
+      input.value = '•'.repeat(48);
+    } else {
+      try {
+        input.value = await loadSettingsSecret('api');
+      } catch {
+        return;
+      }
+    }
     input.dataset.apiKeyMasked = nextMasked ? 'true' : 'false';
     const showIcon = toggle.querySelector('.api-key-icon-show');
     const hideIcon = toggle.querySelector('.api-key-icon-hide');
@@ -1241,11 +1220,9 @@ document.addEventListener('click', async (event) => {
 
   const copy = event.target.closest('[data-api-key-copy]');
   if (copy) {
-    const input = document.getElementById('absulli-api-key');
     const status = document.getElementById('api-key-copy-status');
-    if (!input) return;
     try {
-      await copyTextToClipboard(input.dataset.apiKeyValue || '');
+      await copyTextToClipboard(await loadSettingsSecret('api'));
       if (status) status.textContent = 'Copied.';
     } catch {
       if (status) status.textContent = 'Copy failed.';
@@ -1269,25 +1246,30 @@ document.addEventListener('click', async (event) => {
     if (!input) return;
     const masked = input.dataset.rssFeedMasked !== 'false';
     const nextMasked = !masked;
-    input.value = nextMasked ? '•'.repeat(48) : (input.dataset.rssFeedValue || '');
+    if (nextMasked) {
+      input.value = '•'.repeat(48);
+    } else {
+      try {
+        input.value = await loadSettingsSecret('rss');
+      } catch {
+        return;
+      }
+    }
     input.dataset.rssFeedMasked = nextMasked ? 'true' : 'false';
     const showIcon = rssToggle.querySelector('.api-key-icon-show');
     const hideIcon = rssToggle.querySelector('.api-key-icon-hide');
     if (showIcon) showIcon.hidden = !nextMasked;
     if (hideIcon) hideIcon.hidden = nextMasked;
-    const label = nextMasked ? 'Show RSS feed URL' : 'Hide RSS feed URL';
-    rssToggle.setAttribute('aria-label', label);
-    rssToggle.setAttribute('title', label);
+    rssToggle.setAttribute('aria-label', nextMasked ? 'Show RSS feed URL' : 'Hide RSS feed URL');
+    rssToggle.setAttribute('title', nextMasked ? 'Show RSS feed URL' : 'Hide RSS feed URL');
     return;
   }
 
   const rssCopy = event.target.closest('[data-rss-feed-copy]');
   if (rssCopy) {
-    const input = document.getElementById('rss-feed-url');
     const status = document.getElementById('rss-feed-copy-status');
-    if (!input) return;
     try {
-      await copyTextToClipboard(input.dataset.rssFeedValue || '');
+      await copyTextToClipboard(await loadSettingsSecret('rss'));
       if (status) status.textContent = 'Copied.';
     } catch {
       if (status) status.textContent = 'Copy failed.';
@@ -1309,42 +1291,39 @@ document.addEventListener('click', async (event) => {
   if (metricsToggle) {
     const input = document.getElementById('metrics-token');
     if (!input) return;
-    const fromEnv = input.dataset.metricsTokenFromEnv === 'true';
-    if (fromEnv) {
-      const masked = input.dataset.metricsTokenMasked !== 'false';
-      const nextMasked = !masked;
-      input.value = nextMasked ? 'Configured via .env read only' : (input.dataset.metricsTokenValue || '');
-      input.dataset.metricsTokenMasked = nextMasked ? 'true' : 'false';
-      const showIcon = metricsToggle.querySelector('.metrics-token-icon-show');
-      const hideIcon = metricsToggle.querySelector('.metrics-token-icon-hide');
-      if (showIcon) showIcon.hidden = !nextMasked;
-      if (hideIcon) hideIcon.hidden = nextMasked;
-      const label = nextMasked ? 'Show metrics token' : 'Hide metrics token';
-      metricsToggle.setAttribute('aria-label', label);
-      metricsToggle.setAttribute('title', label);
-      return;
+    if (input.value && input.dataset.metricsTokenFromEnv !== 'true') {
+      input.type = input.type === 'text' ? 'password' : 'text';
+    } else {
+      if (input.dataset.metricsTokenMasked !== 'false') {
+        try {
+          input.value = await loadSettingsSecret('metrics');
+        } catch {
+          return;
+        }
+        input.type = 'text';
+        input.dataset.metricsTokenMasked = 'false';
+      } else {
+        input.value = '';
+        input.type = 'password';
+        input.dataset.metricsTokenMasked = 'true';
+      }
     }
-    if (!input.value) return;
-    const showing = input.type === 'text';
-    input.type = showing ? 'password' : 'text';
+    const masked = input.type === 'password';
     const showIcon = metricsToggle.querySelector('.metrics-token-icon-show');
     const hideIcon = metricsToggle.querySelector('.metrics-token-icon-hide');
-    if (showIcon) showIcon.hidden = !showing;
-    if (hideIcon) hideIcon.hidden = showing;
-    const label = showing ? 'Show metrics token' : 'Hide metrics token';
-    metricsToggle.setAttribute('aria-label', label);
-    metricsToggle.setAttribute('title', label);
+    if (showIcon) showIcon.hidden = !masked;
+    if (hideIcon) hideIcon.hidden = masked;
+    metricsToggle.setAttribute('aria-label', masked ? 'Show metrics token' : 'Hide metrics token');
+    metricsToggle.setAttribute('title', masked ? 'Show metrics token' : 'Hide metrics token');
     return;
   }
 
   const metricsCopy = event.target.closest('[data-metrics-token-copy]');
   if (metricsCopy) {
-    const input = document.getElementById('metrics-token');
     const status = document.getElementById('metrics-token-copy-status');
-    if (!input) return;
-    const value = input.dataset.metricsTokenFromEnv === 'true' ? (input.dataset.metricsTokenValue || '') : input.value;
-    if (!value) return;
     try {
+      const input = document.getElementById('metrics-token');
+      const value = input?.value && input.dataset.metricsTokenFromEnv !== 'true' && input.dataset.metricsTokenMasked !== 'false' ? input.value : await loadSettingsSecret('metrics');
       await copyTextToClipboard(value);
       if (status) status.textContent = 'Copied.';
     } catch {
@@ -1361,6 +1340,11 @@ document.addEventListener('click', async (event) => {
   if (metricsRegenerate && !window.confirm('Regenerate the metrics token? Prometheus clients using the current token will stop working.')) {
     event.preventDefault();
   }
+});
+
+document.querySelector('form[action="/settings/network"]')?.addEventListener('submit', () => {
+  const input = document.getElementById('metrics-token');
+  if (input?.dataset.metricsTokenMasked === 'false') input.value = '';
 });
 
 document.querySelector('[data-job-schedule-form]')?.addEventListener('submit', async (event) => {

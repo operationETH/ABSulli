@@ -309,7 +309,7 @@ def test_notification_cover_requires_valid_token(monkeypatch):
     try:
         db.add(MediaItem(abs_item_id="item-1", title="Known Book"))
         db.commit()
-        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token: False)
+        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token, width: False)
 
         response = client.get("/notification-covers/items/item-1?token=invalid")
 
@@ -324,13 +324,104 @@ def test_notification_cover_proxies_existing_item_with_valid_token(monkeypatch):
     try:
         db.add(MediaItem(abs_item_id="item-1", title="Known Book"))
         db.commit()
-        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token: item_id == "item-1" and token == "valid")
+        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token, width: item_id == "item-1" and token == "valid" and width == 900)
 
-        response = client.get("/notification-covers/items/item-1?token=valid&width=640")
+        response = client.get("/notification-covers/items/item-1?token=valid&width=900")
         assert response.headers["cross-origin-resource-policy"] == "cross-origin"
 
         assert response.status_code == 200
         assert response.content == b"item-image"
-        assert FakeCoverClient.calls == [("item", {"item_id": "item-1", "width": 640, "height": None, "image_format": "webp"})]
+        assert FakeCoverClient.calls == [("item", {"item_id": "item-1", "width": 900, "height": None, "image_format": "webp"})]
     finally:
         db.close()
+
+
+def test_notification_cover_rejects_unauthorized_variants_without_fetching(monkeypatch):
+    client, db = make_client(monkeypatch)
+    try:
+        db.add(MediaItem(abs_item_id="item-1", title="Known Book"))
+        db.commit()
+        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token, width: token == "valid")
+        variants = [
+            "width=1", "width=640", "width=10000", "width=900&height=1",
+            "width=900&fmt=png", "width=900&fmt=webp", "width=900&width=600",
+            "width=900&token=valid", "width=invalid",
+        ]
+        for variant in variants:
+            response = client.get(f"/notification-covers/items/item-1?token=valid&{variant}")
+            assert response.status_code in {404, 422}
+        assert FakeCoverClient.calls == []
+    finally:
+        db.close()
+
+
+def test_notification_cover_only_generates_two_cache_variants(monkeypatch):
+    client, db = make_client(monkeypatch)
+    try:
+        db.add(MediaItem(abs_item_id="item-1", title="Known Book"))
+        db.commit()
+        monkeypatch.setattr(web_routes, "valid_notification_cover_token", lambda item_id, token, width: token == "valid")
+        for width in (600, 900):
+            for _ in range(5):
+                response = client.get(f"/notification-covers/items/item-1?token=valid&width={width}")
+                assert response.status_code == 200
+        assert len(FakeCoverClient.calls) == 2
+    finally:
+        db.close()
+
+
+def test_notification_cover_token_is_bound_to_supported_width(monkeypatch):
+    from pydantic import SecretStr
+    import absulli.core.security as security
+
+    monkeypatch.setattr(
+        security,
+        "get_settings",
+        lambda: SimpleNamespace(secret_key=SecretStr("test-cover-signing-key")),
+    )
+    token_600 = security.notification_cover_token("item-1", width=600)
+    token_900 = security.notification_cover_token("item-1", width=900)
+    assert token_600 != token_900
+    assert security.valid_notification_cover_token("item-1", token_600, width=600)
+    assert not security.valid_notification_cover_token("item-1", token_600, width=900)
+    assert not security.valid_notification_cover_token("item-2", token_600, width=600)
+    assert not security.valid_notification_cover_token("item-1", token_600, width=640)
+
+
+def test_cover_cache_evicts_oldest_entries_when_over_budget(tmp_path, monkeypatch):
+    import os
+    import time
+    from absulli.core.cover_cache import cover_cache_dir, prune_cover_cache, read_cover_cache, write_cover_cache
+
+    write_cover_cache(tmp_path, "a" * 64, b"a" * 200, "image/webp")
+    write_cover_cache(tmp_path, "b" * 64, b"b" * 200, "image/webp")
+    cache_dir = cover_cache_dir(tmp_path)
+    first = cache_dir / "aa" / ("a" * 64 + ".bin")
+    os.utime(first, (time.time() - 100, time.time() - 100))
+    removed = prune_cover_cache(tmp_path, max_bytes=500)
+    assert removed == 1
+    assert read_cover_cache(tmp_path, "a" * 64) is None
+    assert read_cover_cache(tmp_path, "b" * 64) is not None
+
+
+def test_authenticated_cover_dimensions_are_normalized():
+    from absulli.core.security import clamp_image_dimension
+
+    assert clamp_image_dimension(261) == 260
+    assert clamp_image_dimension(99999) == 1200
+    assert clamp_image_dimension(800) == 800
+
+
+def test_cover_cache_prunes_only_after_write_interval(tmp_path, monkeypatch):
+    import absulli.core.cover_cache as cache
+
+    monkeypatch.setattr(cache, "_writes_since_prune", 0)
+    monkeypatch.setattr(cache, "_PRUNE_EVERY_WRITES", 3)
+    calls = []
+    monkeypatch.setattr(cache, "prune_cover_cache", lambda data_dir: calls.append(data_dir))
+
+    for index in range(7):
+        cache.write_cover_cache(tmp_path, f"{index:064x}", b"test", "image/webp")
+
+    assert calls == [tmp_path, tmp_path]
+    assert cache._writes_since_prune == 1

@@ -1752,3 +1752,90 @@ def test_webhook_single_payload_renders_context_for_every_event(monkeypatch):
         "author": "Author",
         "description": "Line one\nLine two",
     }
+
+
+def test_saved_webhook_secret_values_never_render_and_blank_preserves(monkeypatch):
+    stored = {
+        "webhook_url": "https://example.com/secret-webhook-token",
+        "webhook_authorization_header": "Bearer secret-authorization-token",
+        "webhook_custom_headers_json": '{"X-Api-Key":"secret-custom-header-token"}',
+        "webhook_enabled": "true",
+    }
+    client, store = make_client(monkeypatch, stored)
+    response = client.get("/settings?tab=notifications&agent=webhook")
+    assert response.status_code == 200
+    for secret in ("secret-webhook-token", "secret-authorization-token", "secret-custom-header-token"):
+        assert secret not in response.text
+    result = client.post("/settings/notifications/webhook", data={
+        "enabled": "on",
+        "webhook_url": "",
+        "webhook_authorization_header": "",
+        "webhook_custom_header_name": "X-Api-Key",
+        "webhook_custom_header_value": "",
+        "csrf_token": "valid-token",
+    }, follow_redirects=False)
+    assert result.status_code == 303
+    assert store["webhook_url"] == "https://example.com/secret-webhook-token"
+    assert store["webhook_authorization_header"] == "Bearer secret-authorization-token"
+    assert store["webhook_custom_headers_json"] == '{"X-Api-Key":"secret-custom-header-token"}'
+
+
+def test_notification_secret_urls_not_rendered(monkeypatch):
+    client, _ = make_client(monkeypatch, {
+        "discord_webhook_url": "https://discord.example/secret-discord-token",
+        "slack_webhook_url": "https://slack.example/secret-slack-token",
+        "ntfy_url": "https://ntfy.example/secret-ntfy-topic",
+    })
+    response = client.get("/settings?tab=notifications")
+    for value in ("secret-discord-token", "secret-slack-token", "secret-ntfy-topic"):
+        assert value not in response.text
+
+
+def test_optional_notification_credentials_can_be_removed(monkeypatch):
+    ntfy_client, ntfy_store = make_client(monkeypatch, {
+        "ntfy_enabled": "true", "ntfy_url": "https://ntfy.sh/test-topic", "ntfy_token": "ntfy-secret",
+    })
+    page = ntfy_client.get("/settings?tab=notifications&agent=ntfy")
+    assert 'name="remove_ntfy_token"' in page.text
+    response = ntfy_client.post("/settings/notifications/ntfy", data={
+        "csrf_token": "valid-token", "enabled": "on", "ntfy_url": "", "ntfy_token": "", "remove_ntfy_token": "on",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    assert ntfy_store["ntfy_token"] == ""
+
+    webhook_client, webhook_store = make_client(monkeypatch, {
+        "webhook_enabled": "true", "webhook_url": "https://example.com/hook",
+        "webhook_authorization_header": "Bearer secret",
+        "webhook_custom_headers_json": '{"X-Source":"ABSulli"}',
+    })
+    page = webhook_client.get("/settings?tab=notifications&agent=webhook")
+    assert 'name="remove_webhook_authorization_header"' in page.text
+    response = webhook_client.post("/settings/notifications/webhook", data={
+        "csrf_token": "valid-token", "enabled": "on", "webhook_url": "",
+        "remove_webhook_authorization_header": "on",
+        "webhook_custom_header_name": "X-Source", "webhook_custom_header_value": "",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    assert webhook_store["webhook_authorization_header"] == ""
+    assert webhook_store["webhook_custom_headers_json"] == '{"X-Source":"ABSulli"}'
+
+
+def test_disabling_webhook_removes_saved_auth_and_custom_headers(monkeypatch):
+    client, store = make_client(monkeypatch, {
+        "webhook_enabled": "true", "webhook_url": "https://example.com/hook",
+        "webhook_authorization_header": "Bearer secret",
+        "webhook_custom_headers_json": '{"X-Test":"secret"}',
+    })
+    response = client.post("/settings/notifications/webhook", data={
+        "csrf_token": "valid-token", "webhook_url": "",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    assert store["webhook_authorization_header"] == ""
+    assert store["webhook_custom_headers_json"] == ""
+
+
+def test_all_settings_tabs_render_successfully(monkeypatch):
+    client, _store = make_client(monkeypatch)
+    for tab in ("general", "notifications", "jobs", "network", "users", "about"):
+        response = client.get(f"/settings?tab={tab}")
+        assert response.status_code == 200, tab

@@ -112,7 +112,7 @@ def test_api_environment_values_are_read_only(monkeypatch):
 
     page = client.get("/settings?tab=general")
     assert page.status_code == 200
-    assert "environment-key" in page.text
+    assert "environment-key" not in page.text
     assert "Managed by .env" in page.text
     assert "Regenerate Key" not in page.text
 
@@ -124,3 +124,40 @@ def test_api_environment_values_are_read_only(monkeypatch):
     assert response.status_code == 303
     assert store["api_enabled"] == "false"
     assert store["api_token"] == "saved-key"
+
+
+def test_api_secret_is_not_in_settings_html(monkeypatch):
+    client, _ = make_client(monkeypatch, {"api_enabled": "true", "api_token": "unique-secret-api-token"})
+    page = client.get("/settings?tab=general")
+    assert page.status_code == 200
+    assert "unique-secret-api-token" not in page.text
+
+
+def test_secret_endpoint_requires_session_and_csrf(monkeypatch):
+    client, _ = make_client(monkeypatch, {"api_enabled": "true", "api_token": "unique-secret-api-token"})
+    monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: False)
+    response = client.post("/settings/secret", data={"kind": "api", "csrf_token": "invalid"})
+    assert response.status_code == 403
+    assert response.headers["cache-control"] == "no-store"
+    monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
+    response = client.post("/settings/secret", headers={"X-API-Key": "unique-secret-api-token"}, data={"kind": "api", "csrf_token": "valid"})
+    assert response.status_code == 403
+    assert "unique-secret-api-token" not in response.text
+
+
+def test_secret_endpoint_returns_saved_token_with_browser_session(monkeypatch):
+    client, _ = make_client(monkeypatch, {"api_enabled": "true", "api_token": "saved-secret-api-key"})
+    monkeypatch.setattr(web_routes, "read_session_cookie", lambda request: "admin")
+    response = client.post("/settings/secret", data={"kind": "api", "csrf_token": "valid-token"})
+    assert response.status_code == 200
+    assert response.json() == {"value": "saved-secret-api-key"}
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_secret_reveal_works_with_authentication_disabled(monkeypatch):
+    monkeypatch.setenv("ABSULLI_AUTH_ENABLED", "false")
+    client, store = make_client(monkeypatch, {"api_token": "saved-integration-token"})
+    response = client.post("/settings/secret", data={"csrf_token": "valid-token", "kind": "api"})
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["value"] == store["api_token"]

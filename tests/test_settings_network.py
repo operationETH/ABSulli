@@ -76,7 +76,7 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert "HTTPS Secure Cookies" in response.text
     assert "Metrics Token" in response.text
     assert 'id="metrics-token"' in response.text
-    assert 'value="stored-token"' in response.text
+    assert "stored-token" not in response.text
     assert 'data-metrics-token-toggle' in response.text
     assert 'data-metrics-token-copy' in response.text
     assert 'data-metrics-token-regenerate' in response.text
@@ -89,7 +89,7 @@ def test_network_settings_tab_renders_clean_network_fields(monkeypatch):
     assert "CORS Allowed Headers" not in response.text
 
 
-def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_token(monkeypatch):
+def test_network_settings_save_persists_simple_values_and_keeps_blank_metrics_token(monkeypatch):
     client, store = make_client(monkeypatch, {"metrics_token": "saved-token"})
 
     response = client.post(
@@ -111,7 +111,7 @@ def test_network_settings_save_persists_simple_values_and_clears_blank_metrics_t
     assert store["trust_proxy"] == "true"
     assert store["trusted_proxy_ips"] == "127.0.0.1/32"
     assert store["cookie_secure"] == "true"
-    assert store["metrics_token"] == ""
+    assert store["metrics_token"] == "saved-token"
     assert store["security_hsts_enabled"] == "false"
     assert store["cors_allowed_origins"] == ""
     assert "security_hsts_max_age_seconds" not in store
@@ -162,8 +162,8 @@ def test_network_settings_env_values_win_over_saved_settings(monkeypatch):
 
     page = client.get("/settings?tab=network")
     assert page.status_code == 200
-    assert 'value="Configured via .env read only"' in page.text
-    assert 'data-metrics-token-value="env-token"' in page.text
+    assert "env-token" not in page.text
+    assert 'data-metrics-token-value' not in page.text
     assert 'data-metrics-token-toggle aria-label="Show metrics token" title="Show metrics token"' in page.text
     assert 'data-metrics-token-copy aria-label="Copy metrics token" title="Copy metrics token"' in page.text
     assert 'data-metrics-token-regenerate' not in page.text
@@ -403,3 +403,17 @@ def test_network_does_not_warn_when_trusted_proxy_is_configured(monkeypatch):
     response = client.get("/settings?tab=network")
     assert response.status_code == 200
     assert "Proxy trust is enabled but no valid trusted proxy IP addresses" not in response.text
+
+
+def test_network_settings_explicitly_removes_saved_metrics_token(monkeypatch):
+    client, store = make_client(monkeypatch, {"metrics_token": "stored-metrics-secret"})
+    page = client.get("/settings?tab=network")
+    assert 'name="remove_metrics_token"' in page.text
+    assert "stored-metrics-secret" not in page.text
+    response = client.post(
+        "/settings/network",
+        data={"csrf_token": "valid-token", "metrics_token": "", "remove_metrics_token": "on"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert store["metrics_token"] == ""

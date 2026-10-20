@@ -58,10 +58,8 @@ def test_general_settings_tab_renders_editable_audiobookshelf_fields(monkeypatch
     assert "Audiobookshelf URL" in response.text
     assert "http://saved-abs:13378" in response.text
     assert 'id="abs-api-key"' in response.text
-    assert 'value="saved-key"' in response.text
+    assert "saved-key" not in response.text
     assert 'type="password"' in response.text
-    assert 'data-abs-api-key-toggle' in response.text
-    assert 'data-abs-api-key-copy' in response.text
     assert 'readonly' not in response.text.split('id="abs-api-key"', 1)[1].split('>', 1)[0]
     assert 'name="abs_request_timeout"' in response.text
     assert 'value="22"' in response.text
@@ -150,13 +148,11 @@ def test_general_settings_env_values_win_over_saved_settings(monkeypatch):
     assert "http://env-abs:13378" not in page.text
     assert "Managed by .env." not in page.text
     assert 'id="abs-api-key"' in page.text
-    assert 'value="Configured via .env read only"' in page.text
-    assert 'data-abs-api-key-value="env-key"' in page.text
+    assert "env-key" not in page.text
+    assert 'data-abs-api-key-value' not in page.text
     assert 'data-abs-api-key-from-env="true"' in page.text
     abs_input = page.text.split('id="abs-api-key"', 1)[1].split('>', 1)[0]
     assert 'readonly' in abs_input
-    assert 'data-abs-api-key-toggle' in page.text
-    assert 'data-abs-api-key-copy' in page.text
 
     response = client.post(
         "/settings/general",
@@ -230,3 +226,26 @@ def test_effective_general_settings_read_saved_values(monkeypatch):
     assert settings.effective_abs_request_timeout == 44
     assert settings.effective_abs_poll_interval == 45
     assert settings.effective_abs_history_poll_interval == 900
+
+
+def test_general_connection_test_keeps_saved_key_when_blank(monkeypatch):
+    calls = []
+    client, _ = make_client(monkeypatch, {"abs_url": "http://saved-abs", "abs_api_key": "saved-key"})
+
+    class FakeClient:
+        def __init__(self, settings):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def test_connection(self, url, key):
+            calls.append((url, key))
+
+    monkeypatch.setattr(web_routes, "AudiobookshelfClient", FakeClient)
+    response = client.post("/settings/general/test", data={"csrf_token": "valid-token", "abs_url": "http://saved-abs", "abs_api_key": "", "abs_request_timeout": "15"})
+    assert response.status_code == 200
+    assert calls == [("http://saved-abs", "saved-key")]
