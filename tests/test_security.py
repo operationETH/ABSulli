@@ -14,12 +14,10 @@ from absulli.core.security import (
     clean_image_format,
     password_hash,
     read_session_cookie,
-    rotate_session_version,
     set_session_cookie,
     verify_password,
 )
 from absulli.web.routes import router as web_router
-from absulli.web.api import v1_router as api_router
 from absulli.database.models import LoginAttempt, LoginLog
 from absulli.database.session import SessionLocal
 

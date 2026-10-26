@@ -50,7 +50,6 @@ def make_client(monkeypatch, store=None, authenticated=False):
         store.update(values)
 
     monkeypatch.setattr(web_routes, "get_setup_setting", fake_get)
-    monkeypatch.setattr(web_routes, "set_setup_setting", fake_set)
     monkeypatch.setattr(web_routes, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(setup_state, "get_setup_setting", fake_get)
     monkeypatch.setattr(setup_state, "set_setup_setting", fake_set)

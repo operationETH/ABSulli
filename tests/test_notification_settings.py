@@ -8,7 +8,7 @@ from starlette.datastructures import FormData
 import absulli.core.setup_state as setup_state
 import absulli.web.routes as web_routes
 import absulli.web.settings as web_settings
-from absulli.core.config import Settings, get_settings
+from absulli.core.config import get_settings
 from absulli.database.models import Library, NotificationDelivery, NotificationEvent
 from absulli.notifiers.manager import (
     NotificationManager,

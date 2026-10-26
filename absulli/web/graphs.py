@@ -107,7 +107,6 @@ def build_graphs(db: Session, metric: str = "count", days: int = 30, user_key: s
     days = clamp_days(days)
     user_key = clean_graph_user(user_key)
     rows = history_rows_for_graphs(db, days, user_key)
-    value_format = graph_value_formatter(metric)
     now_date = local_datetime(utcnow()).date()
     start_date = now_date - timedelta(days=days - 1)
     date_keys = [start_date + timedelta(days=i) for i in range(days)]

@@ -39,7 +39,6 @@ from absulli.core.security import (
     clamp_image_dimension,
     clean_image_format,
     auth_username,
-    auth_password_hash,
     create_csrf_token,
     is_login_limited,
     login_retry_after_seconds,
@@ -56,7 +55,7 @@ from absulli.core.security import (
     NOTIFICATION_COVER_WIDTHS,
     verify_login,
 )
-from absulli.core.setup_state import get_setup_setting, set_setup_setting, set_setup_settings
+from absulli.core.setup_state import get_setup_setting, set_setup_settings
 from absulli.web.queries import (
     active_sessions_query,
     enrich_active_rows,
@@ -73,7 +72,6 @@ from absulli.web.queries import (
     resolve_media_title,
     library_icon,
     library_items,
-    library_history_rows,
     library_window_stats,
     library_user_stats,
     library_recently_played_items,
@@ -102,11 +100,6 @@ from absulli.web.graphs import build_graphs, clean_graph_user
 from absulli.web.templating import templates
 from absulli.web.update_check import update_status
 
-router = APIRouter()
-log = logging.getLogger(__name__)
-
-COVER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-
 from absulli.web.settings import (
     AGENT_FIELD_CONFIGS,
     NOTIFICATION_EVENT_SETTINGS,
@@ -124,7 +117,6 @@ from absulli.web.settings import (
     history_page_size_context,
     network_settings_context,
     network_values_from_form,
-    notification_events_context,
     notification_library_value_from_form,
     regenerate_api_token,
     regenerate_metrics_token,
@@ -136,7 +128,6 @@ from absulli.web.settings import (
     user_settings_context_fields,
     user_values_from_form,
     bool_label,
-    compact_bytes,
     about_settings_context,
     about_data_context,
     field_from_env,
@@ -150,6 +141,12 @@ from absulli.web.rss import (
     build_rss_feed,
     rss_setting_enabled,
 )
+
+
+router = APIRouter()
+log = logging.getLogger(__name__)
+
+COVER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def clean_page_number(value: object) -> int:
@@ -256,7 +253,6 @@ def author_exists(db: Session, author_id: str) -> bool:
     )
 
 
-
 def cached_cover_response_or_404(cached, detail: str):
     if not cached:
         return None
@@ -335,8 +331,6 @@ def new_books_rss_feed(token: str, request: Request, db: Session = Depends(get_d
             "X-Robots-Tag": "noindex, nofollow",
         },
     )
-
-
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -629,8 +623,6 @@ def logout():
     return response
 
 
-
-
 @router.get("/covers/items/{item_id}")
 async def item_cover(
     item_id: str,
@@ -904,7 +896,6 @@ def history(request: Request, db: Session = Depends(get_db)):
     context.update(history_page_size_context(limit))
     context.update(pagination)
     return templates.TemplateResponse(request, "history.html", context)
-
 
 
 @router.get("/libraries", response_class=HTMLResponse)
@@ -1405,8 +1396,6 @@ def search(request: Request, q: str = "", db: Session = Depends(get_db)):
             "fmt_seconds": fmt_seconds,
         },
     )
-
-
 
 
 @router.get("/graphs", response_class=HTMLResponse)
@@ -1910,7 +1899,6 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
         return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test failed. Check the settings and network."}, status_code=502)
 
     return {"ok": True, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test notification sent."}
-
 
 
 @router.get("/notifications", response_class=HTMLResponse)

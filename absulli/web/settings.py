@@ -935,7 +935,6 @@ def regenerate_metrics_token(settings) -> str:
 
 def gotify_settings_context(settings) -> dict[str, object]:
     stored_url = setup_state.get_setup_setting("gotify_url", "")
-    stored_token = setup_state.get_setup_setting("gotify_token", "")
     effective_url = settings.effective_gotify_url
     effective_token = settings.effective_gotify_token
     return {
