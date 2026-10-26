@@ -13,6 +13,9 @@ on:
       - "requirements.txt"
       - "pyproject.toml"
       - ".dockerignore"
+      - "requirements-dev.txt"
+      - "tests/**"
+      - ".github/workflows/nightly.yml"
   workflow_dispatch:
 
 permissions:
