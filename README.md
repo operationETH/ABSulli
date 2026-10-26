@@ -58,6 +58,8 @@ services:
     image: ghcr.io/operationeth/absulli:latest
     container_name: absulli
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "8272:8272"
     environment:
@@ -76,6 +78,9 @@ Then open **http://\<server-ip\>:8272** and follow the setup wizard.
 
 The wizard will ask for your Audiobookshelf URL and API key, create an admin login, and immediately start importing your data. No `.env` file required.
 
+> [!IMPORTANT]
+> Until setup is finished, anyone who can reach port `8272` can complete the wizard and create the admin account. Run setup right after starting the container.
+
 After setup, application settings can be managed from the **Settings** page.
 
 ---
@@ -83,9 +88,24 @@ After setup, application settings can be managed from the **Settings** page.
 ## Getting your Audiobookshelf API key
 
 1. Open Audiobookshelf and go to **Settings → API-keys → Add API Key**
-2. Name ABSulli
-3. Select your admin user
+2. Name it ABSulli
+3. Select an admin user
 4. Copy the API token from the token field
+
+ABSulli needs an **Admin** account to read users and listening sessions. To limit what the key can do, create a dedicated Audiobookshelf admin user for ABSulli and set its permissions as follows:
+
+| Permission | Setting | Reason |
+|------------|---------|--------|
+| `Can Download` | Off | ABSulli only reads data |
+| `Can Update` | Off | ABSulli only reads data |
+| `Can Delete` | Off | ABSulli only reads data |
+| `Can Upload` | Off | ABSulli only reads data |
+| `Can Create Ereader` | Off | ABSulli only reads data |
+| `Can Access Explicit Content` | On | Explicit items are hidden from ABSulli otherwise |
+| `Can Access All Libraries` | On | Unselected libraries are hidden from ABSulli otherwise |
+| `Can Access All Tags` | On | Items with restricted tags are hidden from ABSulli otherwise |
+
+These toggles don't remove admin-level access, such as managing users and server settings, so keep the key private.
 
 ---
 
@@ -104,11 +124,17 @@ When these are set, the setup wizard shows them as read-only and uses them autom
 
 ## API access
 
-When authentication is enabled, the ABSulli API token allows read-only GET requests to `/api/v1/status`, `/api/v1/activity`, `/api/v1/history`, `/api/v1/users`, and `/api/v1/libraries`. Deprecated `/api/` aliases remain available for those five resources. Use `X-API-Key`, `X-Absulli-Api-Token`, or `Authorization: Bearer` to provide the token.
+When authentication is enabled, the API token gives read-only `GET` access to:
 
-The integration token cannot open the admin web UI, run jobs, change settings, or revoke browser sessions. Revoking browser sessions through `/api/v1/auth/revoke-sessions` requires an authenticated browser session and a valid `X-CSRF-Token` header matching the CSRF cookie. Keep authentication enabled when exposing ABSulli through a reverse proxy.
+- `/api/v1/status`
+- `/api/v1/activity`
+- `/api/v1/history`
+- `/api/v1/users`
+- `/api/v1/libraries`
 
-With proxy trust enabled, login rate limiting uses the rightmost valid `X-Forwarded-For` address. Configure the proxy to append its observed client address and block direct access to the backend. If the proxy does not append a trustworthy address, disable proxy trust until it is configured correctly.
+Deprecated `/api/` aliases still work. Send the token as `X-API-Key`, `X-Absulli-Api-Token`, or `Authorization: Bearer`.
+
+The API token can't open the admin UI, change settings, run jobs, or revoke sessions. To revoke all browser sessions, use **Sign out everywhere** in Settings. Prometheus `/metrics` needs its own metrics token.
 
 ---
 
@@ -116,7 +142,7 @@ With proxy trust enabled, login rate limiting uses the rightmost valid `X-Forwar
 
 ABSulli exposes Prometheus metrics at `/metrics`. This can be scraped by Prometheus for Grafana dashboards or external monitoring.
 
-If you configure a metrics token, include it as a bearer token or with the `X-Absulli-Metrics-Token` header. The metrics token can be configured in Settings → Network.
+To scrape with authentication enabled, configure a metrics token in **Settings → Network** and send it as a bearer token or with the `X-Absulli-Metrics-Token` header.
 
 ---
 
@@ -142,7 +168,7 @@ ABSulli stores all data locally in `/config`:
 | `absulli.db` | SQLite database - activity, history, settings |
 | `secret_key` | Session signing key - keep private |
 
-By default, no data is sent anywhere outside your network. ABSulli communicates with your Audiobookshelf instance, and only sends outbound notification requests if you configure notification agents.
+ABSulli talks to your Audiobookshelf instance and checks GitHub (`api.github.com`) for new releases. No listening data or credentials are included in update checks. Notification requests are only sent if you configure notification agents.
 
 The `/config` directory and its backups contain listening data and sensitive credentials, including Audiobookshelf and notification tokens. Keep the directory and all backups private. Do not upload `absulli.db` to bug reports or commit it to a repository. ABSulli restricts the directory to its container user and creates sensitive files with owner-only permissions.
 
@@ -184,9 +210,17 @@ Existing installs created before Alembic are safely baselined on first start: AB
 
 ## Reverse proxy
 
-ABSulli runs on port `8272` by default. To put it behind Nginx or Traefik, proxy to `http://absulli:8272` and set `ABSULLI_COOKIE_SECURE=true` in your `.env` or enable "HTTPS Secure Cookies" in Settings → Network if serving over HTTPS.
+ABSulli runs on port `8272` by default. Proxy to `http://absulli:8272`, and if serving over HTTPS, enable **HTTPS Secure Cookies** in Settings → Network or set `ABSULLI_COOKIE_SECURE=true`.
 
 ABSulli sets its own security headers (`Content-Security-Policy`, `X-Frame-Options`, `Referrer-Policy`, etc.) on every response. You do not need to add these in your proxy config.
+
+To rate-limit logins by client IP behind a reverse proxy:
+
+1. Enable proxy trust in Settings → Network or set `ABSULLI_TRUST_PROXY=true`.
+2. Add your reverse proxy's IP under Trusted Proxy IP Addresses or `ABSULLI_TRUSTED_PROXY_IPS`. Use a static IP and avoid trusting entire Docker subnets.
+3. Restrict direct access to port `8272` with firewall rules or Docker networking.
+
+ABSulli uses the last `X-Forwarded-For` address for login rate limiting. Your reverse proxy must append the client IP to this header.
 
 ---
 
@@ -201,7 +235,8 @@ ABSulli ships with the following enabled by default:
 - Login audit log (IP, user agent, outcome, reason)
 - CSRF protection on all form submissions
 - Separate API and metrics tokens with independent scopes
+- Runs as a non-root user with read-only application files
 
-Authentication is required after setup and recommended for all installs.
+Authentication is enabled by default after setup. Keep it enabled for all installs.
 
 ---
