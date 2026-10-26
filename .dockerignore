@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 *.pyd
 
+.venv/
+venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -13,6 +15,7 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+*.zip
 
 .env
 .env.local
@@ -29,3 +32,12 @@ secret_key
 .gitignore
 .DS_Store
 Thumbs.db
+
+tests/
+screenshots/
+.github/
+scripts/
+.env.example
+.env.*example
+docker-compose*.yml
+requirements-dev.txt

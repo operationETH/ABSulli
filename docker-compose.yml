@@ -3,6 +3,8 @@ services:
     image: ghcr.io/operationeth/absulli:latest
     container_name: absulli
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "8272:8272"
     environment:
