@@ -25,7 +25,9 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ABSULLI=${ABSULLI_VERSION}
 RUN pip install --no-cache-dir --no-deps . \
     && rm -rf /app/build /app/*.egg-info \
     && python -m compileall -q /app/absulli \
-    && chmod +x /usr/local/bin/docker-entrypoint.sh
+    && chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && python -m pip uninstall -y pip \
+    && rm -rf /usr/local/lib/python3.14/ensurepip
 
 VOLUME /config
 

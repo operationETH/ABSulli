@@ -69,6 +69,8 @@ def test_docker_image_hardening_preserves_runtime_layout():
     assert "COPY --chown=absulli:absulli . ." not in dockerfile
     assert "chmod -R a-w /app" not in dockerfile
     assert "python -m compileall -q /app/absulli" in dockerfile
+    assert "python -m pip uninstall -y pip" in dockerfile
+    assert "rm -rf /usr/local/lib/python3.14/ensurepip" in dockerfile
     assert "touch /config/DOCKER" not in dockerfile
     assert "curl ca-certificates gosu" not in dockerfile
     assert "os.environ.get(\"ABSULLI_PORT\", \"8272\")" in dockerfile
