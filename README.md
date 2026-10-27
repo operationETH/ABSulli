@@ -224,6 +224,17 @@ ABSulli uses the last `X-Forwarded-For` address for login rate limiting. Your re
 
 ---
 
+## Notification cover art
+
+Gotify and Discord notifications can include cover art. Set the ABSulli Public URL under **Settings → Network** and enable **Include Cover Art** for the agent. Leave the Public URL blank to send notifications without covers.
+
+ABSulli uploads Discord covers itself, so only ABSulli needs to reach the Public URL. Gotify loads the cover from the Public URL, so every device showing the notification must be able to reach it.
+
+> [!NOTE]
+> If Gotify's web UI runs on a public address and the Public URL resolves to a local IP, browsers may block the cover. In Chrome, allow **Local network access** in the site settings for your Gotify web UI.
+
+---
+
 ## Security
 
 ABSulli ships with the following enabled by default:
