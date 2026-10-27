@@ -56,7 +56,7 @@ def _cover_url(context: dict[str, str], public_url: str) -> str:
     item_id = context.get("item_id", "").strip()
     if not item_id or not public_url:
         return ""
-    query = urlencode({"width": 600, "token": notification_cover_token(item_id)})
+    query = urlencode({"width": 600, "token": notification_cover_token(item_id, width=600)})
     return (
         f"{public_url.rstrip('/')}/notification-covers/items/"
         f"{quote(item_id, safe='')}?{query}"

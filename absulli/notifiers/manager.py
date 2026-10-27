@@ -546,7 +546,7 @@ class NotificationManager:
             isbn_url = _libro_url(isbn, str(extra.get("title") or "").strip())
             apple_podcasts_url = f"https://podcasts.apple.com/podcast/id{quote(itunes_id, safe='')}" if itunes_id else ""
             if item_id and public_url:
-                token = notification_cover_token(item_id)
+                token = notification_cover_token(item_id, width=900)
                 encoded_item_id = quote(item_id, safe="")
                 cover_url = f"{public_url}/notification-covers/items/{encoded_item_id}?width=900&token={token}"
             if item_id and abs_url:

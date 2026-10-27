@@ -36,7 +36,6 @@ def make_client(monkeypatch, store=None):
         store.update(values)
 
     monkeypatch.setattr(web_routes, "get_setup_setting", fake_get)
-    monkeypatch.setattr(web_routes, "set_setup_setting", fake_set)
     monkeypatch.setattr(web_routes, "set_setup_settings", fake_set_many)
     monkeypatch.setattr(setup_state, "get_setup_setting", fake_get)
     monkeypatch.setattr(setup_state, "set_setup_setting", fake_set)
@@ -75,7 +74,8 @@ def test_users_settings_tab_renders_editable_auth_fields(monkeypatch):
     assert 'placeholder="Required to change password"' in response.text
     assert "Configured — leave blank to keep" not in response.text
     assert "Leave blank to keep the saved value." not in response.text
-    assert "Revoke existing browser sessions after saving" in response.text
+    assert "Revoke existing browser sessions after saving" not in response.text
+    assert "Sign out everywhere" in response.text
     assert "Auth Summary" in response.text
     assert "Login policy details can be changed in a .env file." in response.text
     assert "Login Protection" in response.text

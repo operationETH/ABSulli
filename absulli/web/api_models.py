@@ -73,8 +73,3 @@ class LibraryRow(BaseModel):
     media_type: str
     item_count: int
     updated_at: datetime
-
-
-class RevokeResponse(BaseModel):
-    status: str
-    revoked_sessions: bool

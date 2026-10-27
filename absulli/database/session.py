@@ -88,6 +88,7 @@ def _add_missing_columns() -> None:
 
 def init_db() -> None:
     config = _alembic_config()
+    config.attributes["configure_logger"] = False
 
     if _has_existing_app_schema() and not _has_alembic_version():
         Base.metadata.create_all(bind=engine)

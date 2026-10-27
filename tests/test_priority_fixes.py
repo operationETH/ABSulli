@@ -242,36 +242,19 @@ def test_audiobookshelf_client_test_connection_uses_shared_client_config(monkeyp
 
     captured = {"init": [], "paths": []}
 
-    class FakeResponse:
-        def __init__(self, status_code, payload=None):
-            self.status_code = status_code
-            self._payload = payload or {}
+    def handler(request):
+        captured["paths"].append(request.url.path)
+        if request.url.path == "/api/me":
+            return httpx.Response(404)
+        return httpx.Response(200, json={"libraries": []})
 
-        def json(self):
-            return self._payload
+    actual_client = httpx.AsyncClient
 
-        def raise_for_status(self):
-            if self.status_code >= 400:
-                request = httpx.Request("GET", "https://abs.example/api/me")
-                response = httpx.Response(self.status_code, request=request)
-                raise httpx.HTTPStatusError("error", request=request, response=response)
+    def create(**kwargs):
+        captured["init"].append(kwargs)
+        return actual_client(transport=httpx.MockTransport(handler), **kwargs)
 
-    class FakeAsyncClient:
-        is_closed = False
-
-        def __init__(self, **kwargs):
-            captured["init"].append(kwargs)
-
-        async def get(self, path, **kwargs):
-            captured["paths"].append(path)
-            if path == "/api/me":
-                return FakeResponse(404)
-            return FakeResponse(200, {"libraries": []})
-
-        async def aclose(self):
-            self.is_closed = True
-
-    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(httpx, "AsyncClient", create)
 
     settings = Settings(
         ABSULLI_SECRET_KEY="x" * 32,

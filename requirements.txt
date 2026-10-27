@@ -1,13 +1,13 @@
-fastapi==0.143.0
+fastapi==0.162.0
 uvicorn[standard]==0.54.0
 httpx==0.28.1
-pydantic==2.13.5
-pydantic-settings==2.15.0
-SQLAlchemy==2.1.2
+pydantic==2.14.1
+pydantic-settings==2.16.1
+SQLAlchemy==2.1.6
 Jinja2==3.1.6
 python-multipart==0.0.32
 prometheus-client==0.26.0
 APScheduler==3.11.3
 itsdangerous==2.2.0
 
-alembic==1.20.0
+alembic==1.20.1

@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import and_, desc, exists, func, or_
 from sqlalchemy.orm import Session
 
@@ -28,7 +29,7 @@ from absulli.core.cover_cache import (
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationDelivery, NotificationEvent, Setting
 from absulli.database.session import get_db
 from absulli.notifiers.manager import NOTIFICATION_TEMPLATE_VARIABLES, WEBHOOK_DEFAULT_PAYLOAD, clean_notification_error, render_webhook_payload, validate_notification_template, validate_webhook_json_template
-from absulli.http.abs_client import AudiobookshelfClient
+from absulli.http.abs_client import AudiobookshelfClient, UpstreamResponseTooLarge
 from absulli.monitors.history import remember_deleted_history_sessions
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.core.security import (
@@ -38,12 +39,12 @@ from absulli.core.security import (
     clamp_image_dimension,
     clean_image_format,
     auth_username,
-    auth_password_hash,
     create_csrf_token,
     is_login_limited,
     login_retry_after_seconds,
     record_login_failure,
     record_login_event,
+    read_session_cookie,
     set_csrf_cookie,
     set_session_cookie,
     password_hash,
@@ -51,9 +52,10 @@ from absulli.core.security import (
     setup_required,
     validate_csrf_token,
     valid_notification_cover_token,
+    NOTIFICATION_COVER_WIDTHS,
     verify_login,
 )
-from absulli.core.setup_state import get_setup_setting, set_setup_setting, set_setup_settings
+from absulli.core.setup_state import get_setup_setting, set_setup_settings
 from absulli.web.queries import (
     active_sessions_query,
     enrich_active_rows,
@@ -70,7 +72,6 @@ from absulli.web.queries import (
     resolve_media_title,
     library_icon,
     library_items,
-    library_history_rows,
     library_window_stats,
     library_user_stats,
     library_recently_played_items,
@@ -99,11 +100,6 @@ from absulli.web.graphs import build_graphs, clean_graph_user
 from absulli.web.templating import templates
 from absulli.web.update_check import update_status
 
-router = APIRouter()
-log = logging.getLogger(__name__)
-
-COVER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-
 from absulli.web.settings import (
     AGENT_FIELD_CONFIGS,
     NOTIFICATION_EVENT_SETTINGS,
@@ -121,7 +117,6 @@ from absulli.web.settings import (
     history_page_size_context,
     network_settings_context,
     network_values_from_form,
-    notification_events_context,
     notification_library_value_from_form,
     regenerate_api_token,
     regenerate_metrics_token,
@@ -133,7 +128,6 @@ from absulli.web.settings import (
     user_settings_context_fields,
     user_values_from_form,
     bool_label,
-    compact_bytes,
     about_settings_context,
     about_data_context,
     field_from_env,
@@ -147,6 +141,12 @@ from absulli.web.rss import (
     build_rss_feed,
     rss_setting_enabled,
 )
+
+
+router = APIRouter()
+log = logging.getLogger(__name__)
+
+COVER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def clean_page_number(value: object) -> int:
@@ -253,7 +253,6 @@ def author_exists(db: Session, author_id: str) -> bool:
     )
 
 
-
 def cached_cover_response_or_404(cached, detail: str):
     if not cached:
         return None
@@ -270,8 +269,8 @@ def cached_cover_response_or_404(cached, detail: str):
     )
 
 
-def cache_cover_not_found(settings, cache_key: str) -> None:
-    write_negative_cover_cache(settings.data_dir, cache_key)
+async def cache_cover_not_found(settings, cache_key: str) -> None:
+    await run_in_threadpool(write_negative_cover_cache, settings.data_dir, cache_key)
 
 
 def safe_next_url(value: str | None) -> str:
@@ -332,8 +331,6 @@ def new_books_rss_feed(token: str, request: Request, db: Session = Depends(get_d
             "X-Robots-Tag": "noindex, nofollow",
         },
     )
-
-
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -626,8 +623,6 @@ def logout():
     return response
 
 
-
-
 @router.get("/covers/items/{item_id}")
 async def item_cover(
     item_id: str,
@@ -658,9 +653,11 @@ async def item_cover(
                 height=height,
                 image_format=fmt,
             )
+    except UpstreamResponseTooLarge as exc:
+        raise HTTPException(status_code=502, detail="Audiobookshelf response exceeds the size limit") from exc
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            cache_cover_not_found(settings, cache_key)
+            await cache_cover_not_found(settings, cache_key)
             raise HTTPException(
                 status_code=404,
                 detail="Cover not found",
@@ -668,7 +665,7 @@ async def item_cover(
             ) from exc
         raise HTTPException(status_code=502, detail="Audiobookshelf cover request failed") from exc
 
-    write_cover_cache(settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
+    await run_in_threadpool(write_cover_cache, settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
     return Response(
         content=content,
         media_type=content_type,
@@ -680,14 +677,19 @@ async def item_cover(
 async def notification_item_cover(
     item_id: str,
     token: str,
+    request: Request,
     width: int = 900,
-    height: int | None = None,
-    fmt: str = "webp",
     db: Session = Depends(get_db),
 ):
-    if not valid_notification_cover_token(item_id, token):
+    if (
+        width not in NOTIFICATION_COVER_WIDTHS
+        or set(request.query_params) - {"token", "width"}
+        or len(request.query_params.getlist("token")) != 1
+        or len(request.query_params.getlist("width")) > 1
+        or not valid_notification_cover_token(item_id, token, width)
+    ):
         raise HTTPException(status_code=404, detail="Cover not found")
-    response = await item_cover(item_id=item_id, width=width, height=height, fmt=fmt, db=db)
+    response = await item_cover(item_id=item_id, width=width, height=None, fmt="webp", db=db)
     response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     return response
 
@@ -727,7 +729,7 @@ async def author_cover_by_name(
             author_payload = await client.find_author_in_libraries(author_name, library_ids)
             author_id = author_payload_value(author_payload, "id", "authorId", "_id", "asin")
             if not author_id:
-                cache_cover_not_found(settings, cache_key)
+                await cache_cover_not_found(settings, cache_key)
                 raise HTTPException(
                     status_code=404,
                     detail="Author image not found",
@@ -741,9 +743,11 @@ async def author_cover_by_name(
             )
     except HTTPException:
         raise
+    except UpstreamResponseTooLarge as exc:
+        raise HTTPException(status_code=502, detail="Audiobookshelf response exceeds the size limit") from exc
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            cache_cover_not_found(settings, cache_key)
+            await cache_cover_not_found(settings, cache_key)
             raise HTTPException(
                 status_code=404,
                 detail="Author image not found",
@@ -751,7 +755,7 @@ async def author_cover_by_name(
             ) from exc
         raise HTTPException(status_code=502, detail="Audiobookshelf author image request failed") from exc
 
-    write_cover_cache(settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
+    await run_in_threadpool(write_cover_cache, settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
     return Response(
         content=content,
         media_type=content_type,
@@ -789,9 +793,11 @@ async def author_cover(
                 height=height,
                 image_format=fmt,
             )
+    except UpstreamResponseTooLarge as exc:
+        raise HTTPException(status_code=502, detail="Audiobookshelf response exceeds the size limit") from exc
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            cache_cover_not_found(settings, cache_key)
+            await cache_cover_not_found(settings, cache_key)
             raise HTTPException(
                 status_code=404,
                 detail="Author image not found",
@@ -799,7 +805,7 @@ async def author_cover(
             ) from exc
         raise HTTPException(status_code=502, detail="Audiobookshelf author image request failed") from exc
 
-    write_cover_cache(settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
+    await run_in_threadpool(write_cover_cache, settings.data_dir, cache_key, content, content_type, COVER_CACHE_CONTROL)
     return Response(
         content=content,
         media_type=content_type,
@@ -890,7 +896,6 @@ def history(request: Request, db: Session = Depends(get_db)):
     context.update(history_page_size_context(limit))
     context.update(pagination)
     return templates.TemplateResponse(request, "history.html", context)
-
 
 
 @router.get("/libraries", response_class=HTMLResponse)
@@ -1393,8 +1398,6 @@ def search(request: Request, q: str = "", db: Session = Depends(get_db)):
     )
 
 
-
-
 @router.get("/graphs", response_class=HTMLResponse)
 def graphs(request: Request, db: Session = Depends(get_db)):
     stat_metric = clean_stat_metric(request.query_params.get("metric"))
@@ -1470,6 +1473,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "about_data": about_data_context(db),
             "general_fields": general_settings_context(settings),
             "network_fields": network_settings_context(settings),
+            "trusted_proxy_warning": settings.effective_trust_proxy and not settings.trusted_proxy_networks,
             "api_settings": api_settings_context(settings),
             "rss_feed": rss_feed_context(settings, str(request.base_url)),
             "gotify": gotify_settings_context(settings),
@@ -1484,6 +1488,26 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
     set_csrf_cookie(response, csrf_token)
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@router.post("/settings/secret")
+async def settings_secret(request: Request):
+    form = await request.form()
+    if not validate_csrf_token(request, str(form.get("csrf_token") or "")):
+        return JSONResponse({"detail": "Invalid CSRF token"}, status_code=403, headers={"Cache-Control": "no-store"})
+    settings = get_settings()
+    if settings.auth_enabled and not read_session_cookie(request):
+        return JSONResponse({"detail": "Session required"}, status_code=403, headers={"Cache-Control": "no-store"})
+    kind = str(form.get("kind") or "")
+    if kind == "api":
+        value = settings.effective_api_token
+    elif kind == "metrics":
+        value = settings.effective_metrics_token
+    elif kind == "rss":
+        value = rss_feed_context(settings, str(request.base_url))["url"]
+    else:
+        raise HTTPException(status_code=404, detail="Unknown secret")
+    return JSONResponse({"value": value or ""}, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/v1/jobs", response_class=JSONResponse)
@@ -1539,6 +1563,20 @@ async def jobs_schedule(request: Request, job_id: str):
     return {"updated": True, "job": job}
 
 
+@router.post("/settings/users/revoke-sessions", response_class=HTMLResponse)
+async def settings_users_revoke_sessions(request: Request):
+    form = await request.form()
+    if not validate_csrf_token(request, str(form.get("csrf_token") or "")):
+        raise HTTPException(status_code=403, detail="Your settings form expired. Refresh and try again.")
+    if getattr(request.state, "absulli_auth_method", "") != "session":
+        raise HTTPException(status_code=403, detail="Browser session required.")
+    rotate_session_version()
+    response = RedirectResponse("/login", status_code=303)
+    clear_session_cookie(response)
+    clear_csrf_cookie(response)
+    return response
+
+
 @router.post("/settings/users", response_class=HTMLResponse)
 async def settings_users_save(request: Request):
     form = await request.form()
@@ -1555,7 +1593,7 @@ async def settings_users_save(request: Request):
     previous_username = auth_username()
     set_setup_settings(values)
     username_changed = values.get("auth_username", previous_username) != previous_username
-    revoke_sessions = bool(password_changed or username_changed or form.get("revoke_sessions") == "on")
+    revoke_sessions = bool(password_changed or username_changed)
 
     response = RedirectResponse("/settings?tab=users&saved=users", status_code=303)
     if revoke_sessions:
@@ -1717,10 +1755,16 @@ def webhook_custom_headers_from_form(form) -> str:
     if len(names) != len(values):
         raise ValueError("Webhook custom headers are incomplete")
     headers = {}
-    authorization = str(form.get("webhook_authorization_header") or "").strip()
+    try:
+        previous = json.loads(get_setup_setting("webhook_custom_headers_json", "") or "{}")
+    except (ValueError, TypeError):
+        previous = {}
+    authorization = "" if form.get("remove_webhook_authorization_header") == "on" else (str(form.get("webhook_authorization_header") or "").strip() or get_setup_setting("webhook_authorization_header", ""))
     for name, value in zip(names, values):
         if not name and not value:
             continue
+        if name and not value:
+            value = previous.get(name, "")
         if not name or not value:
             raise ValueError("Each webhook custom header needs both a name and value")
         if name.lower() == "authorization" and authorization:
@@ -1772,7 +1816,7 @@ async def settings_notification_agent_save(request: Request, agent_id: str, db: 
 
     if agent_id == "webhook":
         try:
-            values["webhook_authorization_header"] = str(form.get("webhook_authorization_header") or "").strip()
+            values["webhook_authorization_header"] = "" if form.get("remove_webhook_authorization_header") == "on" else (str(form.get("webhook_authorization_header") or "").strip() or get_setup_setting("webhook_authorization_header", ""))
             values["webhook_custom_headers_json"] = webhook_custom_headers_from_form(form)
             values["webhook_payload_template"] = validate_webhook_json_template(str(form.get("webhook_payload_template") or WEBHOOK_DEFAULT_PAYLOAD))
             values["webhook_headers_json"] = ""
@@ -1783,6 +1827,9 @@ async def settings_notification_agent_save(request: Request, agent_id: str, db: 
             return RedirectResponse(f"/settings?tab=notifications&agent={quote(agent_id)}&error={quote(str(exc))}", status_code=303)
 
     if not is_enabled:
+        if agent_id == "webhook":
+            values["webhook_authorization_header"] = ""
+            values["webhook_custom_headers_json"] = ""
         for field in AGENT_FIELD_CONFIGS[agent_id]["fields"]:
             field_name = str(field["name"])
             if not field_from_env(settings, field_name):
@@ -1823,7 +1870,7 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
     try:
         values = agent_values_from_form(get_settings(), agent_id, form)
         if agent_id == "webhook":
-            values["webhook_authorization_header"] = str(form.get("webhook_authorization_header") or "").strip()
+            values["webhook_authorization_header"] = "" if form.get("remove_webhook_authorization_header") == "on" else (str(form.get("webhook_authorization_header") or "").strip() or get_setup_setting("webhook_authorization_header", ""))
             values["webhook_custom_headers_json"] = webhook_custom_headers_from_form(form)
             values["webhook_payload_template"] = validate_webhook_json_template(str(form.get("webhook_payload_template") or WEBHOOK_DEFAULT_PAYLOAD))
     except ValueError as exc:
@@ -1852,7 +1899,6 @@ async def settings_notification_agent_test(request: Request, agent_id: str):
         return JSONResponse({"ok": False, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test failed. Check the settings and network."}, status_code=502)
 
     return {"ok": True, "message": f"{AGENT_FIELD_CONFIGS[agent_id]['label']} test notification sent."}
-
 
 
 @router.get("/notifications", response_class=HTMLResponse)

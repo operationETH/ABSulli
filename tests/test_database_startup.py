@@ -78,3 +78,58 @@ assert differences == [], f"model and migrations disagree: {differences}"
         text=True,
         check=True,
     )
+
+
+def test_migrations_preserve_application_loggers_and_quiet_http_clients(monkeypatch):
+    import logging
+
+    from absulli.core.logging import configure_logging
+    from absulli.database.session import init_db
+
+    root_logger = logging.getLogger()
+    monkeypatch.setattr(root_logger, "level", logging.INFO)
+    configure_logging()
+    init_db()
+
+    assert root_logger.level == logging.INFO
+    assert logging.getLogger("absulli.core.config").isEnabledFor(logging.INFO)
+    assert logging.getLogger("absulli.core.config").disabled is False
+    assert logging.getLogger("absulli.web.routes").disabled is False
+    assert logging.getLogger("absulli.notifiers.manager").disabled is False
+    assert logging.getLogger("httpx").disabled is False
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
+
+
+def test_migrations_preserve_stdout_logging_format(tmp_path):
+    env = os.environ.copy()
+    env["ABSULLI_DATA_DIR"] = str(tmp_path)
+    env["ABSULLI_SECRET_KEY"] = "test-secret-key-that-is-long-enough-32"
+
+    code = """
+import logging
+import sys
+
+from absulli.core.logging import configure_logging
+from absulli.database.session import init_db
+
+configure_logging("INFO")
+init_db()
+root = logging.getLogger()
+assert root.level == logging.INFO
+assert logging.getLogger("absulli.core.config").isEnabledFor(logging.INFO)
+assert len(root.handlers) == 1
+assert root.handlers[0].stream is sys.stdout
+assert root.handlers[0].formatter._fmt == "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+logging.getLogger("absulli.core.config").info("logging migration check")
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[INFO] absulli.core.config: logging migration check" in result.stdout

@@ -31,7 +31,6 @@ def make_client(monkeypatch):
             pass
 
     monkeypatch.setattr(web_routes, "get_setup_setting", lambda key, default="": store.get(key, default))
-    monkeypatch.setattr(web_routes, "set_setup_setting", lambda key, value: store.__setitem__(key, value))
     monkeypatch.setattr(web_settings.setup_state, "get_setup_setting", lambda key, default="": store.get(key, default))
     monkeypatch.setattr(web_settings.setup_state, "set_setup_setting", lambda key, value: store.__setitem__(key, value))
 

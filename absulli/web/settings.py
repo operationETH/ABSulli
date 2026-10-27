@@ -334,6 +334,13 @@ NETWORK_FIELD_CONFIGS = [
         "default": False,
     },
     {
+        "name": "trusted_proxy_ips",
+        "label": "Trusted Proxy IP Addresses",
+        "description": "Comma-separated proxy IP addresses or narrow CIDR ranges. Use the exact Traefik address, not the full Docker subnet.",
+        "type": "text",
+        "placeholder": "172.18.0.5/32",
+    },
+    {
         "name": "cookie_secure",
         "label": "HTTPS Secure Cookies",
         "description": "Mark browser cookies as HTTPS-only when ABSulli is served through TLS.",
@@ -351,7 +358,7 @@ NETWORK_FIELD_CONFIGS = [
     {
         "name": "metrics_token",
         "label": "Metrics Token",
-        "description": "Protect Prometheus /metrics access with a token. Leave blank to disable token authentication.",
+        "description": "Protect Prometheus /metrics access with a token. Leave blank to keep the saved token.",
         "type": "password",
         "placeholder": "",
     },
@@ -392,7 +399,7 @@ AGENT_FIELD_CONFIGS = {
         "icon": "",
         "icon_template": "partials/notification_icons/discord.svg",
         "fields": [
-            {"name": "discord_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://discord.com/api/webhooks/..."},
+            {"name": "discord_webhook_url", "label": "Webhook URL", "type": "password", "required": True, "placeholder": "https://discord.com/api/webhooks/..."},
             {"name": "discord_include_cover_art", "label": "Include Cover Art", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Show the media cover in rich notifications."},
             {"name": "discord_open_in_audiobookshelf", "label": "Open in Audiobookshelf", "type": "checkbox", "required": False, "default": False, "full_row": True, "helper": "Add a link that opens the item in Audiobookshelf."},
         ],
@@ -413,7 +420,7 @@ AGENT_FIELD_CONFIGS = {
         "icon": "",
         "icon_template": "partials/notification_icons/ntfy.svg",
         "fields": [
-            {"name": "ntfy_url", "label": "Topic URL", "type": "url", "required": True, "placeholder": "https://ntfy.sh/my-topic"},
+            {"name": "ntfy_url", "label": "Topic URL", "type": "password", "required": True, "placeholder": "https://ntfy.sh/my-topic"},
             {"name": "ntfy_token", "label": "Access Token", "type": "password", "required": False, "placeholder": ""},
         ],
     },
@@ -440,7 +447,7 @@ AGENT_FIELD_CONFIGS = {
         "icon": "",
         "icon_template": "partials/notification_icons/slack.svg",
         "fields": [
-            {"name": "slack_webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://hooks.slack.com/services/..."},
+            {"name": "slack_webhook_url", "label": "Webhook URL", "type": "password", "required": True, "placeholder": "https://hooks.slack.com/services/..."},
         ],
     },
     "telegram": {
@@ -457,7 +464,7 @@ AGENT_FIELD_CONFIGS = {
         "icon": "",
         "icon_template": "partials/notification_icons/webhook.svg",
         "fields": [
-            {"name": "webhook_url", "label": "Webhook URL", "type": "url", "required": True, "placeholder": "https://example.com/webhook"},
+            {"name": "webhook_url", "label": "Webhook URL", "type": "password", "required": True, "placeholder": "https://example.com/webhook"},
         ],
     },
 }
@@ -896,8 +903,19 @@ def network_values_from_form(settings, form) -> dict[str, str]:
             values[field_name] = "true" if form.get(field_name) == "on" else "false"
             continue
         submitted = clean_agent_value(str(form.get(field_name) or ""))
+        if field_name == "metrics_token" and form.get("remove_metrics_token") == "on":
+            submitted = ""
+        elif field_type == "password" and not submitted:
+            submitted = setup_state.get_setup_setting(field_name, "")
         values[field_name] = submitted
 
+    from absulli.core.config import parse_trusted_proxy_ips
+
+    trusted_ips = values.get("trusted_proxy_ips", "")
+    networks = parse_trusted_proxy_ips(trusted_ips)
+    values["trusted_proxy_ips"] = ", ".join(str(network) for network in networks)
+    if values.get("trust_proxy") == "true" and not networks:
+        raise ValueError("Add a trusted proxy IP address before enabling proxy trust")
     if values.get("metrics_token") == "change_me":
         raise ValueError("Metrics token cannot be change_me")
     if "cors_allowed_origins" in values:
@@ -917,7 +935,6 @@ def regenerate_metrics_token(settings) -> str:
 
 def gotify_settings_context(settings) -> dict[str, object]:
     stored_url = setup_state.get_setup_setting("gotify_url", "")
-    stored_token = setup_state.get_setup_setting("gotify_token", "")
     effective_url = settings.effective_gotify_url
     effective_token = settings.effective_gotify_token
     return {
@@ -979,8 +996,8 @@ def agent_settings_context(settings, libraries: list[Library] | None = None) -> 
                 "message_templates": notification_templates_context(agent_id),
                 "template_variable_groups": NOTIFICATION_TEMPLATE_VARIABLE_GROUPS,
                 "advanced_open": notification_advanced_open(agent_id),
-                "webhook_authorization_header": setup_state.get_setup_setting("webhook_authorization_header", "") if agent_id == "webhook" else "",
-                "webhook_custom_headers": json.loads(setup_state.get_setup_setting("webhook_custom_headers_json", "") or "{}") if agent_id == "webhook" else {},
+                "webhook_authorization_header_configured": bool(setup_state.get_setup_setting("webhook_authorization_header", "")) if agent_id == "webhook" else False,
+                "webhook_custom_headers": {name: bool(value) for name, value in json.loads(setup_state.get_setup_setting("webhook_custom_headers_json", "") or "{}").items()} if agent_id == "webhook" else {},
                 "webhook_payload_template": webhook_payload_template_context() if agent_id == "webhook" else "",
                 "webhook_default_payload": WEBHOOK_DEFAULT_PAYLOAD if agent_id == "webhook" else "",
             }
@@ -1030,7 +1047,9 @@ def agent_values_from_form(settings, agent_id: str, form) -> dict[str, str]:
             values[field_name] = settings.env_string(field_name)
             continue
         submitted_value = clean_agent_value(str(form.get(field_name) or ""))
-        if field_type == "password" and not submitted_value:
+        if field_name == "ntfy_token" and form.get("remove_ntfy_token") == "on":
+            submitted_value = ""
+        elif (field_type == "password" or field_name in {"discord_webhook_url", "slack_webhook_url", "ntfy_url", "webhook_url"}) and not submitted_value:
             submitted_value = setup_state.get_setup_setting(field_name, "")
         values[field_name] = submitted_value
     return clean_agent_url_fields(agent_id, values)

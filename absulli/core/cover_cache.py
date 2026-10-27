@@ -7,12 +7,17 @@ import logging
 import os
 from pathlib import Path
 import time
+import threading
 
 log = logging.getLogger(__name__)
 
 DEFAULT_BROWSER_MAX_AGE_SECONDS = 86_400
 DEFAULT_BROWSER_STALE_SECONDS = 86_400
 DEFAULT_DISK_TTL_SECONDS = 7 * 86_400
+MAX_COVER_CACHE_BYTES = 250 * 1024 * 1024
+_PRUNE_EVERY_WRITES = 200
+_writes_since_prune = 0
+_cache_lock = threading.RLock()
 DEFAULT_NEGATIVE_BROWSER_MAX_AGE_SECONDS = 300
 DEFAULT_NEGATIVE_DISK_TTL_SECONDS = 6 * 3_600
 
@@ -109,6 +114,7 @@ def write_cover_cache(
     if status_code < 400 and not content:
         return
 
+    global _writes_since_prune
     cache_dir = cover_cache_dir(data_dir)
     body_path, meta_path = _paths(cache_dir, key)
     metadata = {
@@ -120,16 +126,21 @@ def write_cover_cache(
 
     tmp_body = body_path.with_suffix(".bin.tmp")
     tmp_meta = meta_path.with_suffix(".json.tmp")
-    try:
-        body_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_body.write_bytes(content)
-        tmp_meta.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
-        os.replace(tmp_body, body_path)
-        os.replace(tmp_meta, meta_path)
-    except OSError as exc:
-        _safe_unlink(tmp_body)
-        _safe_unlink(tmp_meta)
-        log.debug("Unable to write cover cache entry %s: %s", key, exc)
+    with _cache_lock:
+        try:
+            body_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_body.write_bytes(content)
+            tmp_meta.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+            os.replace(tmp_body, body_path)
+            os.replace(tmp_meta, meta_path)
+            _writes_since_prune += 1
+            if _writes_since_prune >= _PRUNE_EVERY_WRITES:
+                _writes_since_prune = 0
+                prune_cover_cache(data_dir)
+        except OSError as exc:
+            _safe_unlink(tmp_body)
+            _safe_unlink(tmp_meta)
+            log.debug("Unable to write cover cache entry %s: %s", key, exc)
 
 
 def write_negative_cover_cache(
@@ -147,35 +158,62 @@ def write_negative_cover_cache(
     )
 
 
-def prune_cover_cache(data_dir: Path) -> int:
-    cache_dir = cover_cache_dir(data_dir)
-    removed = 0
-    if not cache_dir.exists():
-        return removed
+def prune_cover_cache(data_dir: Path, max_bytes: int = MAX_COVER_CACHE_BYTES) -> int:
+    with _cache_lock:
+        cache_dir = cover_cache_dir(data_dir)
+        removed = 0
+        if not cache_dir.exists():
+            return removed
 
-    for tmp_path in cache_dir.rglob("*.tmp"):
-        _safe_unlink(tmp_path)
-        removed += 1
+        now = time.time()
+        for tmp_path in cache_dir.rglob("*.tmp"):
+            try:
+                if now - tmp_path.stat().st_mtime > 300:
+                    _safe_unlink(tmp_path)
+                    removed += 1
+            except OSError:
+                continue
 
-    now = time.time()
-    for meta_path in cache_dir.rglob("*.json"):
-        key = meta_path.stem
-        body_path, expected_meta_path = _paths(cache_dir, key)
-        if expected_meta_path != meta_path:
-            continue
-        try:
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            status_code = int(metadata.get("status_code") or 200)
-            ttl_seconds = _ttl_for_status(status_code)
-            if not body_path.exists() or (ttl_seconds > 0 and now - body_path.stat().st_mtime > ttl_seconds):
+        entries: list[tuple[float, int, Path, Path]] = []
+        total_bytes = 0
+        known_bodies: set[Path] = set()
+        for meta_path in cache_dir.rglob("*.json"):
+            key = meta_path.stem
+            body_path, expected_meta_path = _paths(cache_dir, key)
+            if expected_meta_path != meta_path:
+                continue
+            try:
+                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+                status_code = int(metadata.get("status_code") or 200)
+                body_stat = body_path.stat()
+                meta_stat = meta_path.stat()
+                ttl_seconds = _ttl_for_status(status_code)
+                if ttl_seconds > 0 and now - body_stat.st_mtime > ttl_seconds:
+                    _remove_entry(body_path, meta_path)
+                    removed += 1
+                    continue
+                size = body_stat.st_size + meta_stat.st_size
+                entries.append((body_stat.st_mtime, size, body_path, meta_path))
+                known_bodies.add(body_path)
+                total_bytes += size
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                log.debug("Unable to inspect cover cache entry %s: %s", key, exc)
                 _remove_entry(body_path, meta_path)
                 removed += 1
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            log.debug("Unable to inspect cover cache entry %s: %s", key, exc)
+
+        for body_path in cache_dir.rglob("*.bin"):
+            if body_path not in known_bodies:
+                _safe_unlink(body_path)
+                removed += 1
+
+        for _mtime, size, body_path, meta_path in sorted(entries, key=lambda entry: entry[0]):
+            if total_bytes <= max_bytes:
+                break
             _remove_entry(body_path, meta_path)
+            total_bytes -= size
             removed += 1
 
-    return removed
+        return removed
 
 
 def cover_response_headers(cache_control: str = COVER_CACHE_CONTROL, hit: bool | None = None) -> dict[str, str]:

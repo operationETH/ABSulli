@@ -44,16 +44,9 @@
           <span>{{ field.label }}{% if field.required %} <em>*</em>{% endif %}</span>
           {% if field.name == 'abs_api_key' %}
           <div class="api-key-input-group abs-api-key-input-group">
-            <input id="abs-api-key" name="abs_api_key" type="{% if field.from_env %}text{% else %}password{% endif %}" value="{% if field.from_env %}Configured via .env read only{% else %}{{ field.value }}{% endif %}" data-abs-api-key-value="{{ field.value }}" data-abs-api-key-from-env="{{ 'true' if field.from_env else 'false' }}" data-abs-api-key-masked="true" autocomplete="off" spellcheck="false" {% if field.from_env %}readonly{% endif %}>
-            <button type="button" class="secondary api-key-icon-button" data-abs-api-key-toggle aria-label="Show Audiobookshelf API key" title="Show Audiobookshelf API key">
-              <svg class="api-key-icon abs-api-key-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
-              <svg class="api-key-icon abs-api-key-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
-            </button>
-            <button type="button" class="secondary api-key-icon-button" data-abs-api-key-copy aria-label="Copy Audiobookshelf API key" title="Copy Audiobookshelf API key">
-              <svg class="api-key-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-            </button>
+            <input id="abs-api-key" name="abs_api_key" type="password" value="" placeholder="{{ 'Configured via .env' if field.from_env else 'Saved. Leave blank to keep' }}" data-abs-api-key-from-env="{{ 'true' if field.from_env else 'false' }}" data-abs-api-key-masked="true" autocomplete="off" spellcheck="false" {% if field.from_env %}readonly{% endif %}>
           </div>
-          <small id="abs-api-key-copy-status" hidden>Copied.</small>
+          <small>Leave blank to keep the saved Audiobookshelf key.</small>
           {% else %}
           <input
             name="{{ field.name }}"
@@ -86,6 +79,9 @@
       <p>Configure the common reverse proxy and metrics options for your ABSulli instance.</p>
     </div>
   </div>
+  {% if trusted_proxy_warning %}
+  <p role="alert">Proxy trust is enabled but no valid trusted proxy IP addresses are configured. Login rate limits will use the connecting proxy IP until this is corrected.</p>
+  {% endif %}
   <form class="settings-form compact-settings-form" method="post" action="/settings/network">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="settings-list">
@@ -105,7 +101,7 @@
           <input type="checkbox" name="{{ field.name }}" {% if field.value == 'true' %}checked{% endif %} {% if field.from_env %}disabled{% endif %}>
           {% elif field.name == 'metrics_token' %}
           <div class="api-key-input-group">
-            <input id="metrics-token" name="metrics_token" type="{% if field.from_env %}text{% else %}password{% endif %}" value="{% if field.from_env %}Configured via .env read only{% else %}{{ field.value }}{% endif %}" data-metrics-token-value="{{ field.value }}" data-metrics-token-from-env="{{ 'true' if field.from_env else 'false' }}" autocomplete="off" spellcheck="false" {% if field.from_env %}readonly{% endif %}>
+            <input id="metrics-token" name="metrics_token" type="password" value="" placeholder="{{ 'Configured via .env' if field.from_env else 'Saved. Leave blank to keep' }}" data-metrics-token-masked="true" data-metrics-token-from-env="{{ 'true' if field.from_env else 'false' }}" autocomplete="off" spellcheck="false" {% if field.from_env %}readonly{% endif %}>
             <button type="button" class="secondary api-key-icon-button" data-metrics-token-toggle aria-label="Show metrics token" title="Show metrics token" {% if not field.token_configured %}disabled{% endif %}>
               <svg class="api-key-icon metrics-token-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg class="api-key-icon metrics-token-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
@@ -119,6 +115,9 @@
             </button>
             {% endif %}
           </div>
+          {% if not field.from_env and field.token_configured %}
+          <label class="settings-check"><input type="checkbox" name="remove_metrics_token"> Remove token</label>
+          {% endif %}
           <small id="metrics-token-copy-status" hidden>Copied.</small>
           {% else %}
           <input
@@ -187,15 +186,15 @@
         <h3>Sessions</h3>
         <p>Changing the username or password revokes sessions automatically.</p>
       </div>
-      <label class="settings-check field-check">
-        <input type="checkbox" name="revoke_sessions">
-        <span>Revoke existing browser sessions after saving</span>
-      </label>
     </div>
 
     <div class="form-actions">
+      <button type="submit" class="secondary" form="revoke-all-sessions-form">Sign out everywhere</button>
       <button type="submit">Save Changes</button>
     </div>
+  </form>
+  <form id="revoke-all-sessions-form" method="post" action="/settings/users/revoke-sessions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>
 </section>
 
@@ -246,7 +245,7 @@
         <div class="settings-row-control api-key-control">
           {% if api_settings.token %}
           <div class="api-key-input-group">
-            <input id="absulli-api-key" type="text" value="{{ '•' * 48 }}" data-api-key-value="{{ api_settings.token }}" data-api-key-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="ABSulli API key">
+            <input id="absulli-api-key" type="text" value="{{ '•' * 48 }}" data-api-key-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="ABSulli API key">
             <button type="button" class="secondary api-key-icon-button" data-api-key-toggle aria-label="Show API key" title="Show API key">
               <svg class="api-key-icon api-key-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg class="api-key-icon api-key-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>
@@ -351,6 +350,9 @@
               {% if field.from_env %}readonly{% endif %}
             >
             {% if field.from_env %}<small>Managed by .env.</small>{% endif %}
+            {% if agent.id == 'ntfy' and field.name == 'ntfy_token' and field.token_configured and not field.from_env %}
+            <span class="settings-check"><input type="checkbox" name="remove_ntfy_token"> Remove token</span>
+            {% endif %}
           </label>
           {% endif %}
         {% endfor %}
@@ -469,7 +471,10 @@
         <p class="form-help">Customize the JSON body sent for every enabled webhook event.</p>
         <label class="webhook-headers-field">
           <span>Authorization Header</span>
-          <input name="webhook_authorization_header" type="text" value="{{ agent.webhook_authorization_header }}" autocomplete="off" placeholder="Optional">
+          <input name="webhook_authorization_header" type="password" value="" autocomplete="off" placeholder="{{ 'Saved. Leave blank to keep' if agent.webhook_authorization_header_configured else 'Optional' }}">
+          {% if agent.webhook_authorization_header_configured and not agent.env_managed %}
+          <span class="settings-check"><input type="checkbox" name="remove_webhook_authorization_header"> Remove header</span>
+          {% endif %}
         </label>
         <div class="webhook-custom-headers" data-webhook-custom-headers>
           <div class="webhook-custom-headers-heading">
@@ -481,7 +486,7 @@
             {% for name, value in agent.webhook_custom_headers.items() %}
             <div class="webhook-custom-header-row">
               <input name="webhook_custom_header_name" type="text" value="{{ name }}" placeholder="Header Name" autocomplete="off">
-              <input name="webhook_custom_header_value" type="text" value="{{ value }}" placeholder="Header Value" autocomplete="off">
+              <input name="webhook_custom_header_value" type="password" value="" placeholder="{{ 'Saved. Leave blank to keep' if value else 'Header Value' }}" autocomplete="off">
               <button type="button" class="secondary" data-webhook-remove-header>Remove</button>
             </div>
             {% endfor %}
@@ -540,7 +545,7 @@
         <div class="settings-row-control api-key-control">
           {% if rss_feed.url %}
           <div class="api-key-input-group">
-            <input id="rss-feed-url" type="text" value="{{ '•' * 48 }}" data-rss-feed-value="{{ rss_feed.url }}" data-rss-feed-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="Private RSS feed URL">
+            <input id="rss-feed-url" type="text" value="{{ '•' * 48 }}" data-rss-feed-masked="true" readonly autocomplete="off" spellcheck="false" aria-label="Private RSS feed URL">
             <button type="button" class="secondary api-key-icon-button" data-rss-feed-toggle aria-label="Show RSS feed URL" title="Show RSS feed URL">
               <svg class="api-key-icon api-key-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.1 12a10.8 10.8 0 0 1 19.8 0 10.8 10.8 0 0 1-19.8 0Z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg class="api-key-icon api-key-icon-hide" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18"/><path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"/><path d="M9.9 4.2A10.7 10.7 0 0 1 21.9 12a10.6 10.6 0 0 1-3 4.2"/><path d="M6.2 6.2A10.7 10.7 0 0 0 2.1 12a10.8 10.8 0 0 0 14.2 5.7"/></svg>

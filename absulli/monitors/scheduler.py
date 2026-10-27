@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from absulli import __version__
 from absulli.core.config import Settings
+from absulli.core.cover_cache import prune_cover_cache
 from absulli.core.setup_state import get_setup_setting, is_setup_complete, set_setup_setting
 from absulli.core.time import utcnow, utcnow_iso
 from absulli.database.models import LoginLog
@@ -336,6 +337,15 @@ class AbsulliScheduler:
             "interval",
             seconds=update_interval,
             id="refresh_update_status",
+            replace_existing=True,
+            max_instances=1,
+        )
+        self.scheduler.add_job(
+            prune_cover_cache,
+            "interval",
+            hours=1,
+            args=[self.settings.data_dir],
+            id="prune_cover_cache",
             replace_existing=True,
             max_instances=1,
         )

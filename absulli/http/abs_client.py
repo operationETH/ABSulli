@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any
 
@@ -6,6 +7,13 @@ import httpx
 from absulli.core.config import Settings
 
 log = logging.getLogger(__name__)
+
+MAX_ABS_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_ABS_JSON_BYTES = 64 * 1024 * 1024
+
+
+class UpstreamResponseTooLarge(ValueError):
+    pass
 
 
 class AudiobookshelfClient:
@@ -67,6 +75,29 @@ class AudiobookshelfClient:
         self._client = None
         self._client_config = None
 
+    async def _bounded_request(
+        self,
+        client: httpx.AsyncClient,
+        path: str,
+        limit: int,
+        **kwargs: Any,
+    ) -> tuple[bytes, dict[str, str]]:
+        async with client.stream("GET", path, **kwargs) as response:
+            response.raise_for_status()
+            size = response.headers.get("content-length")
+            try:
+                declared_size = int(size) if size is not None else None
+            except ValueError:
+                declared_size = None
+            if declared_size is not None and declared_size > limit:
+                raise UpstreamResponseTooLarge("Audiobookshelf response exceeds the size limit")
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(content) + len(chunk) > limit:
+                    raise UpstreamResponseTooLarge("Audiobookshelf response exceeds the size limit")
+                content.extend(chunk)
+            return bytes(content), dict(response.headers)
+
     async def _get(
         self,
         path: str,
@@ -75,9 +106,8 @@ class AudiobookshelfClient:
         api_key: str | None = None,
     ) -> Any:
         client = await self._get_client(base_url=base_url, api_key=api_key)
-        response = await client.get(path, params=params)
-        response.raise_for_status()
-        return response.json()
+        content, _headers = await self._bounded_request(client, path, MAX_ABS_JSON_BYTES, params=params)
+        return json.loads(content)
 
     async def _get_optional(
         self,
@@ -123,16 +153,16 @@ class AudiobookshelfClient:
             params["height"] = height
 
         client = await self._get_client()
-        response = await client.get(
+        content, headers = await self._bounded_request(
+            client,
             path,
+            MAX_ABS_IMAGE_BYTES,
             params=params,
             headers={"Accept": "image/webp,image/jpeg,image/*;q=0.8"},
         )
-        response.raise_for_status()
-
-        content_type = response.headers.get("content-type", "image/webp")
-        cache_control = response.headers.get("cache-control", "public, max-age=86400")
-        return response.content, content_type, cache_control
+        content_type = headers.get("content-type", "image/webp")
+        cache_control = headers.get("cache-control", "public, max-age=86400")
+        return content, content_type, cache_control
 
     async def get_item_cover(
         self,

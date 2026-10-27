@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 from datetime import timedelta
 from urllib.parse import quote
@@ -16,6 +17,20 @@ from absulli.core.setup_state import get_setup_setting, is_setup_complete
 from absulli.core.time import utcnow
 from absulli.database.models import LoginAttempt, LoginLog, Setting
 from absulli.database.session import SessionLocal
+
+
+API_TOKEN_READ_PATHS = frozenset({
+    "/api/v1/status",
+    "/api/v1/activity",
+    "/api/v1/history",
+    "/api/v1/users",
+    "/api/v1/libraries",
+    "/api/status",
+    "/api/activity",
+    "/api/history",
+    "/api/users",
+    "/api/libraries",
+})
 
 
 PUBLIC_PATH_PREFIXES = (
@@ -49,15 +64,28 @@ SECURITY_HEADER_KEYS = {
 }
 
 
-def notification_cover_token(item_id: str) -> str:
+NOTIFICATION_COVER_WIDTHS = frozenset({600, 900})
+
+
+def notification_cover_token(item_id: str, width: int = 900) -> str:
+    if width not in NOTIFICATION_COVER_WIDTHS:
+        raise ValueError("Unsupported notification cover width")
     settings = get_settings()
     secret = settings.secret_key.get_secret_value().encode("utf-8")
-    value = f"notification-cover:{item_id}".encode("utf-8")
+    value = f"notification-cover:{item_id}:{width}:webp".encode("utf-8")
     return hmac.new(secret, value, hashlib.sha256).hexdigest()
 
 
-def valid_notification_cover_token(item_id: str, token: str) -> bool:
-    return hmac.compare_digest(notification_cover_token(item_id), str(token or ""))
+def valid_notification_cover_token(item_id: str, token: str, width: int = 900) -> bool:
+    if width not in NOTIFICATION_COVER_WIDTHS:
+        return False
+    supplied = str(token or "")
+    expected = notification_cover_token(item_id, width)
+    settings = get_settings()
+    secret = settings.secret_key.get_secret_value().encode("utf-8")
+    legacy_value = f"notification-cover:{item_id}".encode("utf-8")
+    legacy_token = hmac.new(secret, legacy_value, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, supplied) or hmac.compare_digest(legacy_token, supplied)
 
 
 def _content_security_policy(nonce: str | None = None) -> str:
@@ -192,7 +220,7 @@ class SecurityHeadersMiddleware:
         if path == "/metrics" and settings.effective_metrics_token:
             return None
 
-        if _valid_api_token(request):
+        if request.method == "GET" and path in API_TOKEN_READ_PATHS and _valid_api_token(request):
             request.state.absulli_authenticated = True
             request.state.absulli_auth_method = "api_token"
             return None
@@ -497,11 +525,24 @@ def _b64decode(value: str) -> bytes:
 
 def client_key(request: Request) -> str:
     settings = get_settings()
-    if settings.effective_trust_proxy:
-        forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
-        if forwarded:
-            return forwarded
-    return request.client.host if request.client else "unknown"
+    peer = request.client.host if request.client else "unknown"
+    if not settings.effective_trust_proxy:
+        return peer
+    try:
+        peer_ip = ipaddress.ip_address(peer)
+        trusted_networks = settings.trusted_proxy_networks
+    except ValueError:
+        return peer
+    if not any(peer_ip in network for network in trusted_networks):
+        return peer
+    forwarded_values = request.headers.getlist("x-forwarded-for")
+    if forwarded_values:
+        forwarded = ",".join(forwarded_values).rsplit(",", 1)[-1].strip()
+        try:
+            return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+    return peer
 
 
 def record_login_event(
@@ -623,7 +664,9 @@ def clear_login_failures(request: Request) -> None:
 def clamp_image_dimension(value: int | None, *, default: int | None = None) -> int | None:
     if value is None:
         return default
-    return max(32, min(1200, int(value)))
+    bounded = max(32, min(1200, int(value)))
+    sizes = (32, 160, 180, 260, 300, 420, 600, 800, 900, 1000, 1200)
+    return min(sizes, key=lambda size: (abs(size - bounded), size))
 
 
 def clean_image_format(value: str | None) -> str:

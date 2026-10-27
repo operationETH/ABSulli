@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +25,11 @@ scheduler = AbsulliScheduler(settings)
 async def lifespan(app: FastAPI):
     init_db()
     warm_setup_state_cache()
+    current_settings = get_settings()
+    if current_settings.effective_trust_proxy and not current_settings.trusted_proxy_networks:
+        logging.getLogger(__name__).warning(
+            "Proxy trust is enabled without valid trusted proxy addresses; forwarded client IPs are ignored"
+        )
     if settings.effective_api_enabled and not settings.effective_api_token:
         ensure_api_token()
     prune_cover_cache(settings.data_dir)

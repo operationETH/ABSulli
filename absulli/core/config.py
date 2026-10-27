@@ -1,4 +1,5 @@
 from functools import lru_cache
+import ipaddress
 from pathlib import Path
 import logging
 import secrets
@@ -8,6 +9,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 log = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=128)
+def parse_trusted_proxy_ips(raw: str) -> tuple:
+    networks = []
+    for part in raw.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            log.warning("Invalid trusted proxy IP or network: %s", value)
+            raise ValueError(f"Invalid trusted proxy IP or network: {value}") from None
+    return tuple(networks)
 
 
 class Settings(BaseSettings):
@@ -76,6 +92,7 @@ class Settings(BaseSettings):
 
     cookie_secure: bool = Field(default=False, alias="ABSULLI_COOKIE_SECURE")
     trust_proxy: bool = Field(default=False, alias="ABSULLI_TRUST_PROXY")
+    trusted_proxy_ips: str = Field(default="", alias="ABSULLI_TRUSTED_PROXY_IPS")
     public_url: str = Field(default="", alias="ABSULLI_PUBLIC_URL")
 
     auth_login_max_attempts: int = Field(default=8, alias="ABSULLI_AUTH_LOGIN_MAX_ATTEMPTS")
@@ -129,6 +146,11 @@ class Settings(BaseSettings):
         """
         key = self.secret_key.get_secret_value().strip()
         weak_defaults = {"", "change_me", "change_me_dev_secret"}
+        if self.trusted_proxy_ips.strip():
+            try:
+                parse_trusted_proxy_ips(self.trusted_proxy_ips)
+            except ValueError:
+                pass
 
         if key not in weak_defaults and len(key) >= 32:
             return self
@@ -345,6 +367,17 @@ class Settings(BaseSettings):
     @property
     def effective_gotify_token(self) -> str:
         return self.effective_setting("gotify_token")
+
+    @property
+    def effective_trusted_proxy_ips(self) -> str:
+        return self.effective_setting("trusted_proxy_ips")
+
+    @property
+    def trusted_proxy_networks(self) -> tuple:
+        try:
+            return parse_trusted_proxy_ips(self.effective_trusted_proxy_ips)
+        except ValueError:
+            return ()
 
     @property
     def effective_trust_proxy(self) -> bool:
