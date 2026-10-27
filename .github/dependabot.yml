@@ -5,8 +5,7 @@ updates:
     directory: "/"
     target-branch: "nightly"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "09:00"
       timezone: "America/Phoenix"
     open-pull-requests-limit: 5
@@ -18,8 +17,7 @@ updates:
     directory: "/"
     target-branch: "nightly"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "09:15"
       timezone: "America/Phoenix"
     open-pull-requests-limit: 5
