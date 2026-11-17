@@ -173,3 +173,37 @@ def test_setup_submit_saves_settings_sets_cookies_and_redirects(monkeypatch):
     assert "absulli_session" in set_cookie
     assert "absulli_csrf" in set_cookie
     assert "httponly" in set_cookie.lower()
+
+
+def test_setup_submit_rejects_embedded_url_credentials(monkeypatch):
+    client = make_setup_client(monkeypatch)
+    monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
+    response = client.post(
+        "/setup",
+        data={
+            "abs_url": "http://admin:secret@audiobookshelf:13378",
+            "abs_api_key": "secret-key",
+            "admin_username": "admin",
+            "admin_password": "password123",
+            "confirm_password": "password123",
+            "csrf_token": "valid-token",
+        },
+    )
+    assert response.status_code == 400
+    assert "no embedded credentials" in response.text
+
+
+def test_setup_connection_test_rejects_invalid_port_before_request(monkeypatch):
+    client = make_setup_client(monkeypatch)
+    monkeypatch.setattr(web_routes, "validate_csrf_token", lambda request, token: True)
+    response = client.post(
+        "/setup/test-connection",
+        data={
+            "abs_url": "http://audiobookshelf:99999",
+            "abs_api_key": "secret-key",
+            "csrf_token": "valid-token",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["ok"] is False
+    assert "invalid hostname or port" in response.json()["message"]

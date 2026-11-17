@@ -51,6 +51,7 @@ def test_reuses_async_client_until_config_changes(monkeypatch):
     assert first.is_closed
     assert created[0] == {
         "base_url": "https://abs.example", "timeout": 9, "verify": False,
+        "follow_redirects": False,
         "headers": {"Authorization": "Bearer api-key"},
     }
     assert created[1]["headers"] == {"Authorization": "Bearer new-api-key"}

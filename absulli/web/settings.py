@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from absulli import __version__
+from absulli.core.abs_url import validate_abs_url
 import absulli.core.setup_state as setup_state
 from absulli.core.security import auth_username, auth_password_hash, password_hash, verify_login
 from absulli.database.models import AbsUser, ActivitySession, Library, ListeningHistory, MediaItem, NotificationEvent
@@ -718,7 +719,7 @@ def general_values_from_form(settings, form) -> dict[str, str]:
             submitted = setup_state.get_setup_setting(field_name, "")
         values[field_name] = submitted
 
-    values["abs_url"] = clean_http_url(values.get("abs_url", ""), "Audiobookshelf URL")
+    values["abs_url"] = validate_abs_url(values.get("abs_url", ""))
     if not values.get("abs_url"):
         raise ValueError("Audiobookshelf URL is required")
     if not values.get("abs_api_key") or values.get("abs_api_key") == "change_me":

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from absulli import __version__
 from absulli.core.config import get_settings
+from absulli.core.abs_url import validate_abs_url
 from absulli.core.time import utcnow
 from absulli.core.cover_cache import (
     COVER_CACHE_CONTROL,
@@ -383,11 +384,10 @@ async def setup_test_connection(request: Request):
     if settings.abs_api_key_from_env:
         abs_api_key = settings.effective_abs_api_key
 
-    if not abs_url.startswith(("http://", "https://")):
-        return JSONResponse(
-            {"ok": False, "message": "Audiobookshelf URL must start with http:// or https://."},
-            status_code=400,
-        )
+    try:
+        abs_url = validate_abs_url(abs_url)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
     if not abs_api_key or abs_api_key == "change_me":
         return JSONResponse(
             {"ok": False, "message": "Audiobookshelf API key is required."},
@@ -489,8 +489,10 @@ def setup_submit(
 
     admin_login_from_env = bool(settings.auth_password_from_env or settings.auth_password_hash_from_env)
 
-    if not abs_url.startswith(("http://", "https://")):
-        return render_error("Audiobookshelf URL must start with http:// or https://.")
+    try:
+        abs_url = validate_abs_url(abs_url)
+    except ValueError as exc:
+        return render_error(str(exc))
     if not abs_api_key or abs_api_key == "change_me":
         return render_error("Audiobookshelf API key is required.")
     if not admin_login_from_env:

@@ -249,3 +249,20 @@ def test_general_connection_test_keeps_saved_key_when_blank(monkeypatch):
     response = client.post("/settings/general/test", data={"csrf_token": "valid-token", "abs_url": "http://saved-abs", "abs_api_key": "", "abs_request_timeout": "15"})
     assert response.status_code == 200
     assert calls == [("http://saved-abs", "saved-key")]
+
+
+def test_general_settings_rejects_embedded_url_credentials(monkeypatch):
+    client, store = make_client(monkeypatch, {"abs_api_key": "saved-key"})
+    response = client.post(
+        "/settings/general",
+        data={
+            "csrf_token": "valid-token",
+            "abs_url": "http://admin:secret@audiobookshelf:13378",
+            "abs_api_key": "saved-key",
+            "abs_request_timeout": "15",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "no%20embedded%20credentials" in response.headers["location"]
+    assert "abs_url" not in store

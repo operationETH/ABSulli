@@ -273,6 +273,7 @@ def test_audiobookshelf_client_test_connection_uses_shared_client_config(monkeyp
             "base_url": "https://abs.example",
             "timeout": 7,
             "verify": False,
+            "follow_redirects": False,
             "headers": {"Authorization": "Bearer setup-key"},
         }
     ]

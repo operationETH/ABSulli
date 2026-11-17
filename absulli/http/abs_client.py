@@ -64,6 +64,7 @@ class AudiobookshelfClient:
             base_url=base_url,
             timeout=timeout,
             verify=verify_ssl,
+            follow_redirects=False,
             headers={"Authorization": f"Bearer {api_key}"},
         )
         self._client_config = config
