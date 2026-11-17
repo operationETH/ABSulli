@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from absulli import __version__
 from absulli.core.config import get_settings
 from absulli.core.abs_url import validate_abs_url
+from absulli.core.setup_rate_limit import setup_connection_retry_after
 from absulli.core.time import utcnow
 from absulli.core.cover_cache import (
     COVER_CACHE_CONTROL,
@@ -35,6 +36,7 @@ from absulli.monitors.history import remember_deleted_history_sessions
 from absulli.monitors.scheduler import AbsulliScheduler
 from absulli.core.security import (
     clear_csrf_cookie,
+    client_key,
     clear_login_failures,
     clear_session_cookie,
     clamp_image_dimension,
@@ -392,6 +394,14 @@ async def setup_test_connection(request: Request):
         return JSONResponse(
             {"ok": False, "message": "Audiobookshelf API key is required."},
             status_code=400,
+        )
+
+    retry_after = setup_connection_retry_after(client_key(request))
+    if retry_after:
+        return JSONResponse(
+            {"ok": False, "message": "Too many connection tests. Please try again shortly."},
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
         )
 
     try:
